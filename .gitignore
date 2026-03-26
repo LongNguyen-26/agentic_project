@@ -1,0 +1,28 @@
+organised_files/
+# Hệ điều hành
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Môi trường ảo (Virtual Environment - phòng trường hợp bạn tạo sau này)
+venv/
+env/
+.venv/
+
+# Biến môi trường và Secrets (RẤT QUAN TRỌNG: Không bao giờ push file này)
+*.env
+.env.example
+*.txt
+
+# File cấu hình IDE/Editor (Ví dụ nếu bạn dùng VSCode)
+.vscode/
+.idea/
+
+# Các file tạm và file test cá nhân của dự án
+.tmp_*
+dry_run_submit_payload.json
+/storage
