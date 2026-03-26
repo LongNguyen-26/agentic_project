@@ -2,6 +2,7 @@ import instructor
 import json
 import random
 import time
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Type
 
 from instructor.core.exceptions import IncompleteOutputException, InstructorRetryException
@@ -10,10 +11,21 @@ from pydantic import BaseModel, ValidationError
 
 from config import config
 from core.logger import get_logger
-from models.llm_schemas import ActionPlanResponse, TaskClassification, VerificationResponse
+from models.llm_schemas import (
+    ActionPlanResponse,
+    PlanningHintsResponse,
+    TaskClassification,
+    VerificationResponse,
+)
 
 
 logger = get_logger(__name__)
+
+
+def _truncate_for_log(value: str, max_chars: int = 2000) -> str:
+    if len(value) <= max_chars:
+        return value
+    return f"{value[:max_chars]}... [truncated {len(value) - max_chars} chars]"
 
 class LLMService:
     def __init__(self):
@@ -40,26 +52,105 @@ class LLMService:
         messages: List[Dict[str, str]],
         max_completion_tokens: int,
         temperature: float,
+        reasoning_effort: Optional[str] = None,
     ) -> BaseModel:
         attempts = max(config.LLM_MAX_RETRIES, 1)
         base_delay = max(config.LLM_RETRY_BASE_DELAY, 0.1)
         jitter = max(config.LLM_RETRY_JITTER, 0.0)
         last_exc: Optional[Exception] = None
         current_max_tokens = max(int(max_completion_tokens), 64)
+        current_messages = deepcopy(messages)
+
+        def _is_context_overflow_error(err_text: str) -> bool:
+            lowered = err_text.lower()
+            return (
+                "maximum context length" in lowered
+                or "context_length_exceeded" in lowered
+                or "string_above_max_length" in lowered
+                or "prompt is too long" in lowered
+            )
+
+        def _trim_messages_for_retry(payload: List[Dict[str, str]]) -> List[Dict[str, str]]:
+            """Trim oldest non-system messages while preserving system and latest user input."""
+            if len(payload) <= 2:
+                trimmed = deepcopy(payload)
+                for msg in reversed(trimmed):
+                    if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                        content = msg["content"]
+                        new_len = max(int(len(content) * 0.8), 400)
+                        if new_len < len(content):
+                            msg["content"] = content[:new_len]
+                        break
+                return trimmed
+
+            systems = [m for m in payload if m.get("role") == "system"]
+            non_system = [m for m in payload if m.get("role") != "system"]
+
+            latest_user_idx = -1
+            for idx in range(len(non_system) - 1, -1, -1):
+                if non_system[idx].get("role") == "user":
+                    latest_user_idx = idx
+                    break
+
+            removable_indices: List[int] = []
+            for idx, item in enumerate(non_system):
+                if idx == latest_user_idx:
+                    continue
+                removable_indices.append(idx)
+
+            if removable_indices:
+                drop_idx = removable_indices[0]
+                non_system.pop(drop_idx)
+
+            return systems + non_system
 
         for attempt in range(1, attempts + 1):
             try:
+                system_prompt = ""
+                user_prompt = ""
+                for msg in current_messages:
+                    if msg.get("role") == "system" and not system_prompt:
+                        system_prompt = str(msg.get("content") or "")
+                    if msg.get("role") == "user":
+                        user_prompt = str(msg.get("content") or "")
+
+                logger.debug(
+                    "[llm] Request model=%s response_model=%s attempt=%s/%s system_prompt=%s user_prompt=%s",
+                    self.reasoning_model,
+                    response_model.__name__,
+                    attempt,
+                    attempts,
+                    _truncate_for_log(system_prompt),
+                    _truncate_for_log(user_prompt),
+                )
+
                 request_kwargs = {
                     "model": self.reasoning_model,
                     "response_model": response_model,
-                    "messages": messages,
+                    "messages": current_messages,
                     "max_completion_tokens": current_max_tokens,
                     "max_retries": 1,
                 }
                 # o-series reasoning models reject temperature.
                 if not self.reasoning_model.lower().startswith("o"):
                     request_kwargs["temperature"] = temperature
-                return self.client.chat.completions.create(**request_kwargs)
+                elif reasoning_effort:
+                    request_kwargs["reasoning_effort"] = reasoning_effort
+                response = self.client.chat.completions.create(**request_kwargs)
+                try:
+                    response_dump = response.model_dump(mode="json")
+                    logger.debug(
+                        "[llm] Parsed response model=%s payload=%s",
+                        response_model.__name__,
+                        _truncate_for_log(json.dumps(response_dump, ensure_ascii=False)),
+                    )
+                except Exception:
+                    logger.debug(
+                        "[llm] Parsed response model=%s object=%s",
+                        response_model.__name__,
+                        _truncate_for_log(str(response)),
+                    )
+                return response
             except (ValidationError, RateLimitError, APITimeoutError, APIError, IncompleteOutputException) as exc:
                 last_exc = exc
                 logger.warning(
@@ -76,10 +167,27 @@ class LLMService:
             except InstructorRetryException as exc:
                 # Instructor can wrap truncation as RetryError/InstructorRetryException.
                 err_text = str(exc)
+                context_limit_hit = _is_context_overflow_error(err_text)
                 token_limit_hit = (
                     "max_tokens length limit" in err_text
                     or "max_tokens or model output limit was reached" in err_text
                 )
+                if context_limit_hit and attempt < attempts:
+                    next_messages = _trim_messages_for_retry(current_messages)
+                    if next_messages == current_messages:
+                        last_exc = exc
+                        break
+                    current_messages = next_messages
+                    logger.warning(
+                        "[llm] Context overflow on model=%s; trimmed messages to %d entries attempt=%s/%s",
+                        self.reasoning_model,
+                        len(current_messages),
+                        attempt,
+                        attempts,
+                    )
+                    sleep_for = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.0, jitter)
+                    time.sleep(sleep_for)
+                    continue
                 if token_limit_hit and attempt < attempts:
                     current_max_tokens = min(current_max_tokens * 2, 8192)
                     logger.warning(
@@ -96,7 +204,25 @@ class LLMService:
                 break
             except BadRequestError as exc:
                 err_text = str(exc)
+                context_limit_hit = _is_context_overflow_error(err_text)
                 token_limit_hit = "max_tokens or model output limit was reached" in err_text
+
+                if context_limit_hit and attempt < attempts:
+                    next_messages = _trim_messages_for_retry(current_messages)
+                    if next_messages == current_messages:
+                        last_exc = exc
+                        break
+                    current_messages = next_messages
+                    logger.warning(
+                        "[llm] Context overflow on model=%s; trimmed messages to %d entries attempt=%s/%s",
+                        self.reasoning_model,
+                        len(current_messages),
+                        attempt,
+                        attempts,
+                    )
+                    sleep_for = (base_delay * (2 ** (attempt - 1))) + random.uniform(0.0, jitter)
+                    time.sleep(sleep_for)
+                    continue
 
                 if token_limit_hit and attempt < attempts:
                     current_max_tokens = min(current_max_tokens * 2, 8192)
@@ -159,6 +285,45 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
             logger.warning("[llm] Task classification failed; defaulting to question-answering", exc_info=True)
             return "question-answering"
 
+    def extract_planning_hints(self, prompt_template: str) -> str:
+        """Extract concise planning hints before entering the inner task graph."""
+        system_prompt = (
+            "You are a careful planning assistant for document-grounded tasks. "
+            "Identify pitfalls before solving. Return JSON only."
+        )
+        user_prompt = (
+            "Read the task prompt and extract warnings for execution.\n"
+            "Focus on: required output format, redacted placeholders, missing-value convention, "
+            "possible calculations/units, and ambiguous terms.\n"
+            "Return concise hints only, do not solve the task.\n\n"
+            f"Task prompt:\n{prompt_template}"
+        )
+
+        try:
+            response = self._chat_with_retries(
+                response_model=PlanningHintsResponse,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS * 4, 256),
+                temperature=0.2,
+                reasoning_effort="high",
+            )
+        except Exception:
+            logger.warning("[llm] Planning hints extraction failed; continue without hints", exc_info=True)
+            return ""
+
+        parts: List[str] = []
+        for idx, hint in enumerate(response.hints, start=1):
+            cleaned = hint.strip()
+            if cleaned:
+                parts.append(f"{idx}. {cleaned}")
+        caution = response.caution.strip()
+        if caution:
+            parts.append(f"Luu y tong quat: {caution}")
+        return "\n".join(parts)
+
     def generate_structured(
         self,
         *,
@@ -166,6 +331,7 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
         user_prompt: str,
         response_model: Type[BaseModel],
         max_completion_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> BaseModel:
         """Generic typed structured output call for node-level usage."""
         return self._chat_with_retries(
@@ -176,6 +342,7 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
             ],
             max_completion_tokens=max_completion_tokens or config.LLM_MAX_OUTPUT_TOKENS,
             temperature=config.TEMPERATURE,
+            reasoning_effort=reasoning_effort,
         )
 
     def generate_action_plan_and_answer(self, *, prompt_template: str, retrieved_evidence: list, task_type: str) -> dict:

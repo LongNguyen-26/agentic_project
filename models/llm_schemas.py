@@ -9,6 +9,15 @@ class TaskClassification(BaseModel):
     )
 
 
+class PlanningHintsResponse(BaseModel):
+    hints: List[str] = Field(default_factory=list)
+    caution: str = Field(default="")
+
+
+class FileSummaryResponse(BaseModel):
+    summary: str = Field(default="")
+
+
 class QAAnswerSchema(BaseModel):
     answer: str = Field(default="")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)

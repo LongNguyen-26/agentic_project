@@ -26,3 +26,4 @@ env/
 .tmp_*
 dry_run_submit_payload.json
 /storage
+/test

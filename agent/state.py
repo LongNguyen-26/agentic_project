@@ -11,6 +11,7 @@ class InnerState(TypedDict):
     resources: List[Dict[str, str]]
     parsed_documents: List[Dict[str, Any]]
     parsed_text: str
+    planning_hints: str
 
     use_rag: bool
     retrieved_context: str
@@ -30,6 +31,7 @@ class OuterState(TypedDict):
     access_token: Optional[str]
 
     current_task: Optional[Dict[str, Any]]
+    planning_hints: str
     task_result: Optional[Dict[str, Any]]
 
     error: Optional[str]

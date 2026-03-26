@@ -18,6 +18,8 @@ class Settings:
 	OPENAI_EMBEDDING_MODEL: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 	MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4o")
 	MODEL_REASONING_ID: str = os.getenv("REASONING_MODEL", "o3-mini")
+	LOCAL_VISION_MODEL: str = os.getenv("LOCAL_VISION_MODEL", "qwen2.5vl:7b")
+	OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 	TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0.1"))
 
 	STORAGE_ROOT: str = os.getenv("STORAGE_ROOT", str(Path("storage")))
@@ -35,6 +37,9 @@ class Settings:
 	CLASSIFICATION_MAX_TOKENS: int = int(os.getenv("CLASSIFICATION_MAX_TOKENS", "64"))
 	LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))
 	VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("VERIFICATION_MAX_OUTPUT_TOKENS", "1200"))
+	PARSER_MIN_TEXT_CHARS: int = int(os.getenv("PARSER_MIN_TEXT_CHARS", "80"))
+	PDF_OCR_MAX_PAGES: int = int(os.getenv("PDF_OCR_MAX_PAGES", "20"))
+	LOCAL_VISION_TIMEOUT_SECONDS: float = float(os.getenv("LOCAL_VISION_TIMEOUT_SECONDS", "90"))
 
 	QA_RAG_DOC_THRESHOLD: int = int(os.getenv("QA_RAG_DOC_THRESHOLD", "5"))
 	RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))

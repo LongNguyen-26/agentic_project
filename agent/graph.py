@@ -12,7 +12,7 @@ from .nodes.inner_loop import (
     action_generation_node, 
     verifiability_node
 )
-from .nodes.outer_loop import auth_node, fetch_task_node, submit_node
+from .nodes.outer_loop import auth_node, fetch_task_node, planning_node, submit_node
 from .nodes.router import route_rag_or_context, check_verification, route_outer_loop
 
 
@@ -76,6 +76,7 @@ def process_task_node(state: OuterState) -> dict:
         "task_id": task.get("id"),
         "task_type": task.get("type") or "question-answering",
         "prompt_template": task.get("prompt_template", ""),
+        "planning_hints": state.get("planning_hints", ""),
         "session_id": state.get("session_id"),
         "access_token": state.get("access_token"),
         "resources": task.get("resources", []),
@@ -114,6 +115,7 @@ outer_workflow = StateGraph(OuterState)
 # Thêm Nodes
 outer_workflow.add_node("auth", auth_node)
 outer_workflow.add_node("fetch", fetch_task_node)
+outer_workflow.add_node("planning", planning_node)
 outer_workflow.add_node("process_task", process_task_node) # Node gọi Inner Graph
 outer_workflow.add_node("submit", submit_node)
 
@@ -126,10 +128,12 @@ outer_workflow.add_conditional_edges(
     "fetch",
     route_outer_loop,
     {
-        "process_task": "process_task",
+        "process_task": "planning",
         "end": END
     }
 )
+
+outer_workflow.add_edge("planning", "process_task")
 
 outer_workflow.add_edge("process_task", "submit")
 outer_workflow.add_edge("submit", "fetch") # Nộp xong lập tức lấy task mới

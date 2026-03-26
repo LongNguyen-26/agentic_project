@@ -8,6 +8,27 @@ from core.checkpoint import load_checkpoint
 
 logger = get_logger(__name__)
 
+
+def _is_meaningful_value(value):
+    return value not in (None, "", [], {})
+
+
+def _extract_important_updates(state_update: dict) -> dict:
+    important = {}
+
+    for key in ("task_result", "answers", "error", "confidence", "confidence_score", "should_continue"):
+        if key in state_update and _is_meaningful_value(state_update.get(key)):
+            important[key] = state_update.get(key)
+
+    task_result = state_update.get("task_result")
+    if isinstance(task_result, dict):
+        if _is_meaningful_value(task_result.get("answers")):
+            important["answers"] = task_result.get("answers")
+        if _is_meaningful_value(task_result.get("confidence")):
+            important["confidence"] = task_result.get("confidence")
+
+    return important
+
 def main():
     setup_logging()
     logger.info("[agent] Starting VPP AI Agent runtime")
@@ -21,6 +42,7 @@ def main():
         "session_id": session_id,
         "access_token": access_token,
         "current_task": None,
+        "planning_hints": "",
         "task_result": None,
         "error": None,
         "should_continue": True
@@ -35,13 +57,23 @@ def main():
         # Chúng ta dùng "recursion_limit" cao để agent cắm chuột chạy liên tục.
         config = {"recursion_limit": 1000} 
         
-        for output in agent_app.stream(initial_state, config=config):
-            # In ra các node đang được thực thi
+        for output in agent_app.stream(initial_state, config=config, stream_mode="updates"):
             for node_name, state_update in output.items():
-                logger.debug("[loop] Node completed: %s", node_name.upper())
+                if not isinstance(state_update, dict):
+                    logger.info("[Graph] Node '%s' completed", node_name)
+                    continue
+
+                important_updates = _extract_important_updates(state_update)
+                if important_updates:
+                    updates_text = ", ".join(
+                        f"{key}: {value}" for key, value in important_updates.items()
+                    )
+                    logger.info("[Graph] Node '%s' updated -> %s", node_name, updates_text)
+                else:
+                    logger.debug("[Graph] Node '%s' completed (no important updates)", node_name)
 
                 # Một số node có thể không ghi state (None), cần chặn an toàn.
-                if isinstance(state_update, dict) and state_update.get("should_continue") is False:
+                if state_update.get("should_continue") is False:
                     logger.info("[loop] No more tasks available; stopping execution")
                     return
                     

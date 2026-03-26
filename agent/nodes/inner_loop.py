@@ -7,7 +7,7 @@ from clients.llm_client import LLMService
 from config import config
 from core.logger import get_logger
 from models.llm_schemas import QAAnswerSchema, VerificationResponse
-from tools.context_manager import format_full_context
+from tools.context_manager import format_context_from_documents, format_full_context, get_or_create_file_summary
 from tools.document_parser import parse_resource_bytes
 from tools.rag_engine import build_and_retrieve_context
 
@@ -58,7 +58,19 @@ def observability_node(state: InnerState) -> dict:
             token=token,
         )
         text = parse_resource_bytes(file_path, downloaded["bytes"])
-        parsed_documents.append({"file_path": file_path, "text": text})
+        summary, cache_hit = get_or_create_file_summary(
+            file_path=file_path,
+            raw_text=text,
+            llm_service=_get_llm_service(),
+        )
+        parsed_documents.append(
+            {
+                "file_path": file_path,
+                "text": text,
+                "summary": summary,
+                "summary_cache_hit": cache_hit,
+            }
+        )
         full_text_parts.append(f"[FILE] {file_path}\n{text}")
 
     full_text = "\n\n".join(full_text_parts).strip()
@@ -82,7 +94,9 @@ def setup_rag_node(state: InnerState) -> dict:
 def setup_context_manager_node(state: InnerState) -> dict:
     """Nếu không cần RAG thì dùng toàn văn bản đã chuẩn hóa."""
     logger.info("[Context] Using full context manager for task_id=%s", state.get("task_id"))
-    context = format_full_context(state["parsed_text"])
+    context = format_context_from_documents(state.get("parsed_documents", []))
+    if not context.strip():
+        context = format_full_context(state["parsed_text"])
     used_tools = list(state.get("used_tools", []))
     used_tools.append("context_manager")
     return {"retrieved_context": context, "used_tools": used_tools}
@@ -115,6 +129,7 @@ def action_generation_node(state: InnerState) -> dict:
         prompt_template=state.get("prompt_template", ""),
         context=context,
         feedback=feedback,
+        planning_hints=state.get("planning_hints", ""),
     )
 
     draft_response = _get_llm_service().generate_structured(

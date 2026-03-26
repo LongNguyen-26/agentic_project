@@ -1,10 +1,12 @@
 # agent/nodes/outer_loop.py
 from agent.state import OuterState
 from clients.competition_client import APIClient
+from clients.llm_client import LLMService
 from core.checkpoint import _persist_session_checkpoint
 from core.logger import get_logger
 
 client = None
+llm_service = None
 logger = get_logger(__name__)
 
 
@@ -13,6 +15,14 @@ def _get_client() -> APIClient:
     if client is None:
         client = APIClient()
     return client
+
+
+def _get_llm_service() -> LLMService:
+    """Lazily initialize shared LLM service for outer-loop planning."""
+    global llm_service
+    if llm_service is None:
+        llm_service = LLMService()
+    return llm_service
 
 def auth_node(state: OuterState) -> dict:
     """Xử lý xác thực và phục hồi phiên."""
@@ -37,10 +47,25 @@ def fetch_task_node(state: OuterState) -> dict:
 
     if not task:
         logger.info("[loop] No tasks returned by server")
-        return {"current_task": None, "should_continue": False}
+        return {"current_task": None, "planning_hints": "", "should_continue": False}
 
     task_type = task.get("type") or "question-answering"
     return {"current_task": {**task, "type": task_type}, "should_continue": True}
+
+
+def planning_node(state: OuterState) -> dict:
+    """Extract high-level hints/cautions before invoking the inner graph."""
+    task = state.get("current_task")
+    if not task:
+        return {"planning_hints": ""}
+
+    prompt_template = task.get("prompt_template", "")
+    if not prompt_template.strip():
+        return {"planning_hints": ""}
+
+    logger.info("[planning] Extracting pre-execution hints for task_id=%s", task.get("id"))
+    hints = _get_llm_service().extract_planning_hints(prompt_template)
+    return {"planning_hints": hints}
 
 def submit_node(state: OuterState) -> dict:
     """Nộp kết quả bài làm lên server."""
@@ -59,4 +84,4 @@ def submit_node(state: OuterState) -> dict:
     else:
         logger.warning("[submit] Submit failed for task_id=%s", task_id)
 
-    return {"current_task": None, "task_result": None}
+    return {"current_task": None, "planning_hints": "", "task_result": None}
