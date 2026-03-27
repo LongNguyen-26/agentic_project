@@ -31,7 +31,7 @@ class DocumentParseError(AgentBaseException):
     pass
 
 class VectorDBError(AgentBaseException):
-    """Lỗi khi khởi tạo hoặc query RAG (FAISS/Cohere)."""
+    """Lỗi khi khởi tạo hoặc query RAG (FAISS/OpenAI)."""
     pass
 
 class LLMGenerationError(AgentBaseException):

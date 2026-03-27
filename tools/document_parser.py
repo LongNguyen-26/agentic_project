@@ -76,6 +76,21 @@ def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
         "images": [_encode_image(image_bytes)],
         "stream": False,
     }
+    # try:
+    #     response = requests.post(
+    #         f"{config.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
+    #         json=payload,
+    #         timeout=config.LOCAL_VISION_TIMEOUT_SECONDS,
+    #     )
+    #     response.raise_for_status()
+    #     data = response.json()
+    #     text = str(data.get("response", "")).strip()
+    #     if text:
+    #         logger.info("[parser] Tier 2 local OCR success chars=%d mime=%s", len(text), mime)
+    #     return text
+    # except Exception:
+    #     logger.warning("[parser] Tier 2 local OCR failed", exc_info=True)
+    #     return ""
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
@@ -88,8 +103,17 @@ def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
         if text:
             logger.info("[parser] Tier 2 local OCR success chars=%d mime=%s", len(text), mime)
         return text
-    except Exception:
-        logger.warning("[parser] Tier 2 local OCR failed", exc_info=True)
+    except requests.exceptions.ConnectionError:
+        # Bắt riêng lỗi không gọi được local host (10061)
+        logger.warning("[parser] Tier 2 local OCR failed: Không thể kết nối. Vui lòng kiểm tra xem Ollama đã được bật (run local) chưa.")
+        return ""
+    except requests.exceptions.HTTPError as e:
+        # Bắt lỗi nếu gọi được nhưng model chưa được pull (thường trả về 404)
+        logger.warning(f"[parser] Tier 2 local OCR failed: Chưa pull model '{config.LOCAL_VISION_MODEL}' hoặc lỗi từ Ollama. Chi tiết: {e}")
+        return ""
+    except Exception as e:
+        # Các lỗi khác in ra thông báo ngắn gọn thay vì cả cục traceback
+        logger.warning(f"[parser] Tier 2 local OCR failed: {str(e)}")
         return ""
 
 
