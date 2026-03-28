@@ -175,6 +175,13 @@ def verifiability_node(state: InnerState) -> dict:
     logger.info("[Verifiability] Checking answer consistency for task_id=%s", state.get("task_id"))
 
     if state["task_type"] == "folder-organisation":
+        draft = state["draft_answer"]
+        confidence = state.get("confidence_score", draft.get("confidence", 0.0))
+        answers = draft.get("answers", [])
+        
+        # Light verification: Kiểm tra xem có sinh ra được answer nào không và điểm confidence có đạt mức tối thiểu không
+        is_valid = len(answers) > 0 and confidence >= config.VERIFIER_MIN_CONFIDENCE
+        
         return {
             "is_verified": True,
             "verification_feedback": "",

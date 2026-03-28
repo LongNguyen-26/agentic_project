@@ -42,6 +42,11 @@ def auth_node(state: OuterState) -> dict:
 
 def fetch_task_node(state: OuterState) -> dict:
     """Kéo task mới từ server."""
+    # NẾU TASK CŨ CHƯA NỘP THÀNH CÔNG, BỎ QUA VIỆC FETCH VÀ RETRY TASK HIỆN TẠI
+    if state.get("current_task") is not None:
+        logger.info("[task] Retrying existing task_id=%s", state["current_task"]["id"])
+        return {"should_continue": True}
+    
     logger.info("[task] Fetching next task")
     task = _get_client().fetch_next_task()
 
@@ -86,7 +91,9 @@ def submit_node(state: OuterState) -> dict:
 
     if success:
         logger.info("[submit] Submit success for task_id=%s", task_id)
+        # CHỈ XÓA STATE KHI THÀNH CÔNG
+        return {"current_task": None, "planning_hints": "", "task_result": None}
     else:
-        logger.warning("[submit] Submit failed for task_id=%s", task_id)
-
-    return {"current_task": None, "planning_hints": "", "task_result": None}
+        logger.warning("[submit] Submit failed for task_id=%s, keeping task in state to retry", task_id)
+        # NẾU LỖI, GIỮ NGUYÊN STATE ĐỂ RETRY
+        return {}

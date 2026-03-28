@@ -253,8 +253,13 @@ class APIClient:
         answers = payload.get("answers", [])
         thought_log = payload.get("thought_log", "")
         used_tools = payload.get("used_tools", [])
-        self.submit_task(task_id=task_id, answers=answers, thought_log=thought_log, used_tools=used_tools)
-        return True
+        # self.submit_task(task_id=task_id, answers=answers, thought_log=thought_log, used_tools=used_tools)
+        try:
+            self.submit_task(task_id=task_id, answers=answers, thought_log=thought_log, used_tools=used_tools)
+            return True
+        except Exception as e:
+            logger.error("[submit] Failed to submit task_result: %s", e)
+            return False
 
     def close(self):
         self.client.close()

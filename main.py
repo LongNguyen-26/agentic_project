@@ -87,7 +87,11 @@ def main():
                     logger.info("[loop] No more tasks available; stopping execution")
                     return
                     
-            time.sleep(1) # Nghỉ 1s giữa các node để tránh quá tải CPU/Rate limit
+            # Thay đổi logic sleep linh hoạt (Adaptive Throttling)
+            if node_name in ["fetch", "submit"]:
+                time.sleep(0.5) # Chỉ nghỉ lâu sau khi giao tiếp với Server BTC
+            else:
+                time.sleep(0.05) # Nghỉ rất ngắn giữa các node tính toán cục bộ # Nghỉ 1s giữa các node để tránh quá tải CPU/Rate limit
             
     except KeyboardInterrupt:
         logger.warning("[agent] Process interrupted by user (Ctrl+C)")
