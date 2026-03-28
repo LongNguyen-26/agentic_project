@@ -180,9 +180,26 @@ class APIClient:
         content = self.download_file(token)
 
         root = Path(config.STORAGE_ROOT) / (self.session_id or "unknown_session") / task_id / "raw"
-        target = root / Path(file_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content)
+        relative_path = Path(file_path)
+        target = root / relative_path
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        except OSError as e:
+            # Windows may fail on very deep/long paths; fallback to a flat hashed filename.
+            safe_suffix = relative_path.suffix if relative_path.suffix else ".bin"
+            safe_name = f"{hashlib.sha256(file_path.encode('utf-8')).hexdigest()}{safe_suffix}"
+            fallback_dir = root / "_flat"
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            target = fallback_dir / safe_name
+            target.write_bytes(content)
+            logger.warning(
+                "[resource] Failed nested persist for %s (%s); saved to fallback path=%s",
+                file_path,
+                e,
+                target,
+            )
         logger.debug("[resource] Saved file_path=%s bytes=%s", file_path, len(content))
 
         checksum = hashlib.sha256(content).hexdigest()

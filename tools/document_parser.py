@@ -123,6 +123,14 @@ def _parse_pdf_with_ollama(pdf_bytes: bytes) -> str:
     if doc.page_count == 0:
         return ""
 
+    # THÊM ĐOẠN NÀY: Kiểm tra nhanh xem Ollama có đang chạy không
+    try:
+        # Ping đến root URL của Ollama với timeout cực ngắn (1 giây)
+        requests.get(f"{config.OLLAMA_BASE_URL.rstrip('/')}/", timeout=1)
+    except requests.exceptions.RequestException:
+        logger.warning("[parser] Ollama không hoạt động. Bỏ qua Tier 2 cho PDF này và chuyển lên Tier 3.")
+        return ""
+
     max_pages = min(doc.page_count, max(config.PDF_OCR_MAX_PAGES, 1))
     parts: List[str] = []
     for page_idx in range(max_pages):

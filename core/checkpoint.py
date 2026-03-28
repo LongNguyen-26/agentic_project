@@ -1,5 +1,6 @@
 # core/checkpoint.py
 import json
+import hashlib
 import os
 from typing import Any, Dict, Optional, Tuple
 
@@ -12,6 +13,7 @@ logger = get_logger(__name__)
 # Mặc định lưu vào thư mục data/sessions/
 DEFAULT_CHECKPOINT_DIR = os.path.join(os.getcwd(), config.STORAGE_ROOT)
 DEFAULT_CHECKPOINT_FILE = os.path.join(DEFAULT_CHECKPOINT_DIR, "session_checkpoint.json")
+PARSED_CACHE_DIR = os.path.join(DEFAULT_CHECKPOINT_DIR, "parsed_cache")
 
 def _ensure_dir_exists(filepath: str):
     """Đảm bảo thư mục tồn tại trước khi ghi file."""
@@ -110,3 +112,41 @@ def load_file_summary_cache(filepath: str = DEFAULT_CHECKPOINT_FILE) -> Dict[str
     data = _load_raw_checkpoint(filepath)
     cached = data.get("file_summary_cache", {})
     return cached if isinstance(cached, dict) else {}
+
+
+def _get_safe_filename(file_path: str) -> str:
+    """Create a filesystem-safe cache filename from the source file path."""
+    safe_hash = hashlib.sha256(file_path.encode("utf-8")).hexdigest()
+    return f"{safe_hash}.txt"
+
+
+def load_parsed_text_cache(file_path: str) -> Optional[str]:
+    """Load parsed text from disk cache using file_path as the lookup key."""
+    safe_name = _get_safe_filename(file_path)
+    cache_file = os.path.join(PARSED_CACHE_DIR, safe_name)
+
+    if not os.path.exists(cache_file):
+        return None
+
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        logger.warning("[cache] Failed to read parsed text cache %s: %s", cache_file, e, exc_info=True)
+        return None
+
+
+def save_parsed_text_cache(file_path: str, parsed_text: str) -> bool:
+    """Save parsed text to disk cache using a file_path-derived key."""
+    os.makedirs(PARSED_CACHE_DIR, exist_ok=True)
+    safe_name = _get_safe_filename(file_path)
+    cache_file = os.path.join(PARSED_CACHE_DIR, safe_name)
+
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write(parsed_text)
+        logger.debug("[cache] Saved parsed text cache for %s", file_path)
+        return True
+    except Exception as e:
+        logger.warning("[cache] Failed to write parsed text cache %s: %s", cache_file, e, exc_info=True)
+        return False

@@ -6,6 +6,7 @@ from clients.competition_client import APIClient
 from clients.llm_client import LLMService
 from config import config
 from core.logger import get_logger
+from core.checkpoint import load_parsed_text_cache, save_parsed_text_cache
 from models.llm_schemas import QAAnswerSchema, VerificationResponse
 from tools.context_manager import format_context_from_documents, format_full_context, get_or_create_file_summary
 from tools.document_parser import parse_resource_bytes
@@ -42,22 +43,42 @@ def observability_node(state: InnerState) -> dict:
     full_text_parts = []
     resources = state.get("resources", [])
     local_client = _get_api_client()
+
     if state.get("session_id"):
         local_client.session_id = state["session_id"]
     if state.get("access_token"):
         local_client.access_token = state["access_token"]
+
+    if not hasattr(observability_node, "_in_memory_cache"):
+        observability_node._in_memory_cache = {}
 
     for resource in resources:
         file_path = resource.get("file_path", "unknown")
         token = resource.get("token")
         if not token:
             continue
-        downloaded = local_client.download_and_persist_resource(
-            task_id=state["task_id"],
-            file_path=file_path,
-            token=token,
-        )
-        text = parse_resource_bytes(file_path, downloaded["bytes"])
+
+        if file_path in observability_node._in_memory_cache:
+            logger.info("[Observability] RAM Cache HIT: %s", file_path)
+            text = observability_node._in_memory_cache[file_path]
+        else:
+            cached_text = load_parsed_text_cache(file_path)
+            if cached_text is not None:
+                logger.info("[Observability] Disk Cache HIT: %s", file_path)
+                text = cached_text
+                observability_node._in_memory_cache[file_path] = text
+            else:
+                logger.info("[Observability] Cache MISS, downloading & parsing: %s", file_path)
+                downloaded = local_client.download_and_persist_resource(
+                    task_id=state["task_id"],
+                    file_path=file_path,
+                    token=token,
+                )
+                text = parse_resource_bytes(file_path, downloaded["bytes"])
+                observability_node._in_memory_cache[file_path] = text
+                save_parsed_text_cache(file_path, text)
+
+        # 4. Tiếp tục luồng tóm tắt nội dung file (Summary Cache)
         summary, cache_hit = get_or_create_file_summary(
             file_path=file_path,
             raw_text=text,
