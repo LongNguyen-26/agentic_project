@@ -419,13 +419,13 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
             logger.error("[llm] Verification generation failed", exc_info=True)
             return VerificationResponse(thought_log=f"Error: {e}").model_dump()
         
-    def generate_folder_response(self, *, prompt_template: str, file_contents: Dict[str, str]) -> dict:
+    def generate_folder_response(self, *, prompt_template: str, file_summaries: Dict[str, str]) -> dict:
         retrieved_evidence = [
             {
                 "content": content,
                 "metadata": {"file_path": path},
             }
-            for path, content in file_contents.items()
+            for path, content in file_summaries.items()
         ]
         evidence_block = self._build_evidence_block(retrieved_evidence)
 
@@ -438,7 +438,7 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
             f"Task type: folder-organisation\n"
             f"Prompt template:\n{prompt_template}\n\n"
             f"Retrieved evidence:\n{evidence_block}\n\n"
-            "Generate precise instructions for how to organize files into folders based on the prompt and evidence."
+            "You are provided with a list of file paths and their concise summaries. Generate precise instructions for how to organize these files into the valid folders based on the prompt. Pay close attention to the document types mentioned in the summaries."
         )
 
         try:

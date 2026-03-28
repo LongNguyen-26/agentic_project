@@ -134,10 +134,10 @@ def action_generation_node(state: InnerState) -> dict:
     feedback = state.get("verification_feedback", "")
 
     if state["task_type"] == "folder-organisation":
-        file_contents = {doc["file_path"]: doc["text"] for doc in state.get("parsed_documents", [])}
+        file_summaries = {doc["file_path"]: doc["summary"] for doc in state.get("parsed_documents", [])}
         response = _get_llm_service().generate_folder_response(
             prompt_template=state.get("prompt_template", ""),
-            file_contents=file_contents,
+            file_summaries=file_summaries,
         )
         return {
             "draft_answer": response,
