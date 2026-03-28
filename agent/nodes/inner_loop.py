@@ -176,15 +176,22 @@ def verifiability_node(state: InnerState) -> dict:
 
     if state["task_type"] == "folder-organisation":
         draft = state["draft_answer"]
-        confidence = state.get("confidence_score", draft.get("confidence", 0.0))
+        confidence = float(state.get("confidence_score", draft.get("confidence", 0.0)) or 0.0)
         answers = draft.get("answers", [])
         
         # Light verification: Kiểm tra xem có sinh ra được answer nào không và điểm confidence có đạt mức tối thiểu không
         is_valid = len(answers) > 0 and confidence >= config.VERIFIER_MIN_CONFIDENCE
+        feedback = ""
+        if not is_valid:
+            feedback = (
+                f"Folder verification failed: answers={len(answers)}, "
+                f"confidence={confidence:.3f}, required_confidence={config.VERIFIER_MIN_CONFIDENCE:.3f}."
+            )
         
         return {
-            "is_verified": True,
-            "verification_feedback": "",
+            "confidence_score": confidence,
+            "is_verified": is_valid,
+            "verification_feedback": feedback,
             "attempts": state["attempts"] + 1,
         }
 
