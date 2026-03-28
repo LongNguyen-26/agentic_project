@@ -50,6 +50,11 @@ def fetch_task_node(state: OuterState) -> dict:
         return {"current_task": None, "planning_hints": "", "should_continue": False}
 
     task_type = task.get("type") or "question-answering"
+    prompt_template = task.get("prompt_template", "")
+    
+    # ---> THÊM DÒNG LOG NÀY <---
+    short_prompt = (prompt_template[:100] + "...") if len(prompt_template) > 100 else prompt_template
+    logger.info("[task] Received task_id=%s, task_type=%s, prompt='%s'", task.get("id"), task_type, short_prompt)
     return {"current_task": {**task, "type": task_type}, "should_continue": True}
 
 

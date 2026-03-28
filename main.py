@@ -20,6 +20,16 @@ def _extract_important_updates(state_update: dict) -> dict:
         if key in state_update and _is_meaningful_value(state_update.get(key)):
             important[key] = state_update.get(key)
 
+    # ---> THÊM LOGIC TRÍCH XUẤT THÔNG TIN TASK TẠI ĐÂY <---
+    current_task = state_update.get("current_task")
+    if isinstance(current_task, dict):
+        if _is_meaningful_value(current_task.get("type")):
+            important["task_type"] = current_task.get("type")
+        if _is_meaningful_value(current_task.get("prompt_template")):
+            pt = current_task.get("prompt_template")
+            # Cắt ngắn prompt template (ví dụ 100 ký tự) để log không bị quá dài
+            important["prompt_template"] = (pt[:100] + "...") if len(pt) > 100 else pt
+
     task_result = state_update.get("task_result")
     if isinstance(task_result, dict):
         if _is_meaningful_value(task_result.get("answers")):
