@@ -9,15 +9,26 @@ MAX_RETRIES = config.MAX_RETRIES
 MIN_CONFIDENCE = config.VERIFIER_MIN_CONFIDENCE
 
 def route_rag_or_context(state: InnerState) -> str:
-    """Dùng RAG cho QA khi số tài liệu vượt ngưỡng cấu hình."""
+    """Điều hướng sang nhánh RAG hoặc context manager trong inner loop.
+
+    Args:
+        state: Trạng thái inner loop chứa cờ use_rag.
+
+    Returns:
+        str: "use_rag" khi bật RAG, ngược lại "use_context_manager".
+    """
     if state.get("use_rag"):
         return "use_rag"
     return "use_context_manager"
 
 def check_verification(state: InnerState) -> str:
-    """
-    Nút chặn Self-Correction: Kiểm tra xem đáp án đã đạt chuẩn chưa.
-    Nếu confidence < ngưỡng hoặc is_verified = False -> Quay lại action_generation
+    """Quyết định thoát hay lặp lại vòng self-correction.
+
+    Args:
+        state: Trạng thái inner loop chứa attempts, is_verified và confidence_score.
+
+    Returns:
+        str: "pass" nếu đạt điều kiện dừng hoặc quá số lần retry, ngược lại "retry".
     """
     if state["attempts"] >= MAX_RETRIES:
         logger.warning("[Verifiability] Max retries reached; accepting current answer")
@@ -35,7 +46,14 @@ def check_verification(state: InnerState) -> str:
     return "retry"
 
 def route_outer_loop(state: OuterState) -> str:
-    """Kiểm tra xem BTC còn task không, nếu không thì kết thúc."""
+    """Điều hướng vòng lặp ngoài sang xử lý task hoặc kết thúc.
+
+    Args:
+        state: Trạng thái outer loop chứa current_task và should_continue.
+
+    Returns:
+        str: "process_task" khi còn task cần xử lý, ngược lại "end".
+    """
     if state.get("current_task") is None or not state.get("should_continue", True):
         return "end"
     return "process_task"

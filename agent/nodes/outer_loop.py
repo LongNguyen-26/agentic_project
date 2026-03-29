@@ -27,7 +27,14 @@ def _get_llm_service() -> LLMService:
     return llm_service
 
 def auth_node(state: OuterState) -> dict:
-    """Xử lý xác thực và phục hồi phiên."""
+    """Xác thực phiên làm việc và đồng bộ token vào client.
+
+    Args:
+        state: Trạng thái outer loop chứa session_id và access_token hiện tại.
+
+    Returns:
+        dict: Thông tin session/access token mới hoặc cờ dừng khi xác thực thất bại.
+    """
     logger.info("[auth] Checking authentication state")
     local_client = _get_client()
 
@@ -43,7 +50,14 @@ def auth_node(state: OuterState) -> dict:
     return {}
 
 def fetch_task_node(state: OuterState) -> dict:
-    """Kéo task mới từ server."""
+    """Lấy task tiếp theo và xác định task_type nếu API chưa cung cấp.
+
+    Args:
+        state: Trạng thái outer loop chứa current_task và thông tin điều khiển vòng lặp.
+
+    Returns:
+        dict: current_task đã chuẩn hóa type và cờ should_continue cho router outer loop.
+    """
     # NẾU TASK CŨ CHƯA NỘP THÀNH CÔNG, BỎ QUA VIỆC FETCH VÀ RETRY TASK HIỆN TẠI
     if state.get("current_task") is not None:
         logger.info("[task] Retrying existing task_id=%s", state["current_task"]["id"])
@@ -97,7 +111,14 @@ def fetch_task_node(state: OuterState) -> dict:
 
 
 def planning_node(state: OuterState) -> dict:
-    """Extract high-level hints/cautions before invoking the inner graph."""
+    """Trích xuất planning hints từ đề bài trước khi gọi inner graph.
+
+    Args:
+        state: Trạng thái outer loop chứa current_task và prompt_template.
+
+    Returns:
+        dict: planning_hints để tăng độ chính xác cho action generation.
+    """
     task = state.get("current_task")
     if not task:
         return {"planning_hints": ""}
@@ -114,7 +135,14 @@ def planning_node(state: OuterState) -> dict:
     return {"planning_hints": hints}
 
 def submit_node(state: OuterState) -> dict:
-    """Nộp kết quả bài làm lên server."""
+    """Nộp kết quả task lên server và quyết định có xóa state hay không.
+
+    Args:
+        state: Trạng thái outer loop chứa current_task và task_result hiện tại.
+
+    Returns:
+        dict: State cập nhật sau submit; chỉ clear task khi submit thành công.
+    """
     task_id = state["current_task"]["id"]
     result = state.get("task_result")
 

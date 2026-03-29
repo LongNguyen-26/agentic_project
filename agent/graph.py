@@ -1,4 +1,48 @@
 # agent/graph.py
+"""Định nghĩa StateGraph tổng thể cho VPP agent theo mô hình Outer/Inner Loop.
+
+Luồng tổng quan:
+
+        OUTER LOOP (Competition Lifecycle)
+        +------+     +-------+     +----------+     +-------------+     +--------+
+        | auth | --> | fetch | --> | planning | --> | process_task| --> | submit |
+        +------+     +-------+     +----------+     +-------------+     +--------+
+                                         |                                                    |
+                                         +------------------- no task ------------------------+
+                                                                                 -> END
+
+        INNER LOOP (Per-task Processing, gọi trong process_task)
+        +---------------+
+        | observability |
+        +---------------+
+                        |
+                        v
+            route_rag_or_context
+                /             \\
+             v               v
+        +----------+   +--------------+
+        | setup_rag|   | setup_context|
+        +----------+   +--------------+
+                 \\             /
+                    v           v
+                +-------------------+
+                | action_generation |
+                +-------------------+
+                                    |
+                                    v
+                     +---------------+
+                     | verifiability |
+                     +---------------+
+                                    |
+                                    v
+                    check_verification
+                         |         |
+                        pass     retry
+                         |         |
+                         v         +------> action_generation
+                        END
+"""
+
 from langgraph.graph import StateGraph, END
 
 from core.logger import get_logger
@@ -67,7 +111,14 @@ inner_app = inner_workflow.compile()
 # 2. BỌC INNER GRAPH VÀO 1 NODE CỦA OUTER GRAPH
 # ==========================================
 def process_task_node(state: OuterState) -> dict:
-    """Nút này là cầu nối, nó sẽ gọi Inner Graph chạy."""
+    """Cầu nối outer loop để thực thi inner loop cho một task cụ thể.
+
+    Args:
+        state: Trạng thái outer loop chứa current_task, auth info và planning hints.
+
+    Returns:
+        dict: task_result đã được tổng hợp từ draft_answer cuối của inner loop.
+    """
     task = state["current_task"]
     logger.info("[task] Processing task_id=%s type=%s", task.get("id"), task.get("type"))
 

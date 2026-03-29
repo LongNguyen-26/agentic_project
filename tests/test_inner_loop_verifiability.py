@@ -1,11 +1,19 @@
 import unittest
+from unittest import mock
 
-from agent.nodes.inner_loop import verifiability_node
+from agent.nodes import inner_loop
 from config import config
 
 
 class FolderVerifiabilityTests(unittest.TestCase):
     def test_folder_invalid_answer_requests_retry(self):
+        fake_llm = mock.Mock()
+        fake_llm.generate_verification_response.return_value = mock.Mock(
+            confidence=0.1,
+            thought_log="No confident folder mapping.",
+            used_tools=["verifier"],
+        )
+
         state = {
             "task_id": "task-1",
             "task_type": "folder-organisation",
@@ -16,7 +24,8 @@ class FolderVerifiabilityTests(unittest.TestCase):
             "prompt_template": "",
         }
 
-        update = verifiability_node(state)
+        with mock.patch.object(inner_loop, "_get_llm_service", return_value=fake_llm):
+            update = inner_loop.verifiability_node(state)
 
         self.assertFalse(update["is_verified"])
         self.assertEqual(update["attempts"], 1)
@@ -24,17 +33,31 @@ class FolderVerifiabilityTests(unittest.TestCase):
 
     def test_folder_valid_answer_passes_verification(self):
         confidence = max(config.VERIFIER_MIN_CONFIDENCE, 0.8)
+        valid_folder = next(iter(inner_loop.VALID_FOLDERS))
+
+        fake_llm = mock.Mock()
+        fake_llm.generate_verification_response.return_value = mock.Mock(
+            confidence=confidence,
+            thought_log="",
+            used_tools=["verifier"],
+        )
+
         state = {
             "task_id": "task-2",
             "task_type": "folder-organisation",
-            "draft_answer": {"answers": ["fileA -> folder1"], "confidence": confidence},
+            "draft_answer": {
+                "answers": ["fileA -> folder1"],
+                "thought_log": f"Folder: {valid_folder}",
+                "confidence": confidence,
+            },
             "confidence_score": confidence,
             "attempts": 1,
             "retrieved_context": "",
             "prompt_template": "",
         }
 
-        update = verifiability_node(state)
+        with mock.patch.object(inner_loop, "_get_llm_service", return_value=fake_llm):
+            update = inner_loop.verifiability_node(state)
 
         self.assertTrue(update["is_verified"])
         self.assertEqual(update["attempts"], 2)
