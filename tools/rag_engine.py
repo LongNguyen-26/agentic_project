@@ -1,4 +1,4 @@
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.retrievers import BM25Retriever
@@ -27,10 +27,9 @@ def build_and_retrieve_context(full_text: str, query: str, top_k: int = 5) -> st
         return ""
 
     logger.debug("[rag] Splitting text into chunks")
-    text_splitter = RecursiveCharacterTextSplitter(
+    text_splitter = MarkdownTextSplitter(
         chunk_size=config.RAG_CHUNK_SIZE,
         chunk_overlap=config.RAG_CHUNK_OVERLAP,
-        length_function=len
     )
     chunks = text_splitter.split_text(full_text)
     
