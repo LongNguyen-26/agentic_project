@@ -1,63 +1,116 @@
 # prompts/user_prompt.py
+from typing import Any, Dict
+from agent.prompts.sys_prompts import VALID_FOLDERS_STR
 
-def build_action_prompt(
-    task_type: str,
+
+def build_qa_action_prompt(
     prompt_template: str,
     context: str,
     feedback: str = "",
     planning_hints: str = "",
 ) -> str:
-    base_prompt = (
-        f"Nhiệm vụ: {task_type}\n"
-        f"Đề bài gốc:\n{prompt_template}\n\n"
-    )
-
+    prompt = f"Task Type: question-answering\n\n<task_instruction>\n{prompt_template}\n</task_instruction>\n\n"
     if planning_hints:
-        base_prompt += (
-            "[CẢNH BÁO / HINTS TRƯỚC KHI GIẢI]\n"
-            f"{planning_hints}\n\n"
+        prompt += f"<planning_hints>\n{planning_hints}\n</planning_hints>\n\n"
+    prompt += f"<context>\n{context}\n</context>\n\n"
+    if feedback:
+        prompt += (
+            f"<feedback_from_previous_error>\n{feedback}\nDO NOT REPEAT THIS ERROR."
+            "\n</feedback_from_previous_error>\n\n"
         )
+    return prompt
 
-    base_prompt += (
-        f"[DỮ LIỆU CUNG CẤP]\n{context}\n\n"
+
+def build_sort_action_prompt(
+    prompt_template: str,
+    file_summaries: Dict[str, str],
+    feedback: str = "",
+    planning_hints: str = "",
+) -> str:
+    summary_lines = [
+        f"[Summary #{idx}] path={path}\n{summary.strip()}"
+        for idx, (path, summary) in enumerate(file_summaries.items(), start=1)
+    ]
+    summaries_block = "\n\n".join(summary_lines) if summary_lines else "No file summaries provided."
+
+    prompt = (
+        "Task Type: folder-organisation\n\n"
+        f"<task_instruction>\n{prompt_template}\n</task_instruction>\n\n"
+        "<valid_folders>\n"
+        f"{VALID_FOLDERS_STR}\n"
+        "</valid_folders>\n\n"
+        "<file_summaries>\n"
+        f"{summaries_block}\n"
+        "</file_summaries>\n\n"
+        "You are provided with a list of file paths and their concise summaries."
+        " Generate precise sorting decisions and select only valid folders.\n\n"
+    )
+    if planning_hints:
+        prompt += f"<planning_hints>\n{planning_hints}\n</planning_hints>\n\n"
+    if feedback:
+        prompt += (
+            f"<feedback_from_previous_error>\n{feedback}\nDO NOT REPEAT THIS ERROR."
+            "\n</feedback_from_previous_error>\n\n"
+        )
+    return prompt
+
+
+def build_qa_verification_prompt(prompt_template: str, draft_answer: Dict[str, Any], context: str) -> str:
+    return (
+        f"<task_instruction>\n{prompt_template}\n</task_instruction>\n\n"
+        f"<source_context>\n{context}\n</source_context>\n\n"
+        f"<draft_answer_json>\n{draft_answer}\n</draft_answer_json>\n\n"
+        "Verify faithfulness and schema correctness."
     )
 
-    if feedback:
-        base_prompt += f"⚠️ LƯU Ý TỪ LẦN THỬ TRƯỚC (BẠN ĐÃ LÀM SAI):\n{feedback}\nHãy khắc phục lỗi này trong lần trả lời này.\n"
 
-    base_prompt += "\nHãy phân tích dữ liệu và trả lời chuẩn xác theo schema bắt buộc."
-    return base_prompt
-
-def build_verification_prompt(prompt_template: str, draft_answer, context: str) -> str:
+def build_sort_verification_prompt(
+    prompt_template: str,
+    draft_answer: Dict[str, Any],
+    file_summaries: Dict[str, str],
+) -> str:
+    summary_lines = [
+        f"[Summary #{idx}] path={path}\n{summary.strip()}"
+        for idx, (path, summary) in enumerate(file_summaries.items(), start=1)
+    ]
+    summaries_block = "\n\n".join(summary_lines) if summary_lines else "No file summaries provided."
     return (
-        f"[ĐỀ BÀI GỐC]\n{prompt_template}\n\n"
-        f"[NGỮ CẢNH GỐC]\n{context}\n\n"
-        f"[CÂU TRẢ LỜI CẦN KIỂM DUYỆT]\n{draft_answer}\n\n"
-        "Hãy đánh giá chính xác, sửa nếu cần, và xuất đúng VerificationResponse."
+        f"<task_instruction>\n{prompt_template}\n</task_instruction>\n\n"
+        "<valid_folders>\n"
+        f"{VALID_FOLDERS_STR}\n"
+        "</valid_folders>\n\n"
+        f"<file_summaries>\n{summaries_block}\n</file_summaries>\n\n"
+        f"<draft_answer_json>\n{draft_answer}\n</draft_answer_json>\n\n"
+        "Re-validate sorting output. Keep answers as [] for folder tasks and correct folder choices if unsupported."
+    )
+
+
+def build_task_classification_prompt(prompt_template: str) -> str:
+    return f"Prompt Template to classify:\n{prompt_template}"
+
+
+def build_planning_hints_prompt(prompt_template: str) -> str:
+    return (
+        "Read the task prompt and extract warnings for execution.\n"
+        "Focus on: required output format, redacted placeholders, missing-value convention,"
+        " possible calculations/units, and ambiguous terms.\n"
+        "Return concise hints only, do not solve the task.\n\n"
+        f"Task prompt:\n{prompt_template}"
     )
 
 
 def build_hints_extraction_prompt(prompt_template: str) -> str:
-    return (
-        "Bạn đang ở bước chuẩn bị trước khi giải task VPP.\n"
-        "Chỉ đọc đề bài và trích xuất các rủi ro/cảnh báo cần lưu ý, chưa được giải bài.\n\n"
-        "Tập trung vào các nhóm bẫy sau:\n"
-        "1. Bẫy định dạng output (thứ tự trường, dấu phân tách, đơn vị, cách ghi rỗng).\n"
-        "2. Placeholder bị ẩn dạng [tag_name] phải giữ nguyên verbatim.\n"
-        "3. Từ ngữ dễ gây nhầm lẫn (đặc biệt thuật ngữ tiếng Nhật hoặc cụm đa nghĩa).\n"
-        "4. Điều kiện đặc biệt có thể làm sai câu trả lời nếu bỏ sót.\n\n"
-        "Yêu cầu đầu ra: liệt kê ngắn gọn các cảnh báo theo bullet, không đưa đáp án.\n\n"
-        f"[PROMPT TEMPLATE]\n{prompt_template}"
-    )
+    """Backward-compatible alias for planning hints prompt."""
+    return build_planning_hints_prompt(prompt_template)
 
 
 def build_file_summary_prompt(file_name: str, file_content: str) -> str:
     return (
-        "Hãy tóm tắt tài liệu dưới đây để phục vụ cache ngữ cảnh.\n"
-        "Yêu cầu:\n"
-        "1. Tóm tắt 3-5 câu, ngắn gọn, nêu đúng nội dung chính của file.\n"
-        "2. Liệt kê rõ các placeholder dạng [tag_name] xuất hiện trong file (nếu có), giữ nguyên từng chuỗi.\n"
-        "3. Không suy diễn ngoài nội dung file.\n\n"
+        "Summarize the following document for context cache usage.\n"
+        "Requirements:\n"
+        "1. Produce 3-5 concise sentences capturing key content.\n"
+        "2. List placeholder tokens like [tag_name] verbatim if present.\n"
+        "3. Do not infer beyond document content.\n\n"
         f"[FILE NAME]\n{file_name}\n\n"
         f"[FILE CONTENT]\n{file_content}"
     )

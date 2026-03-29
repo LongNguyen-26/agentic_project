@@ -1,13 +1,27 @@
 # agent/nodes/inner_loop.py
-from agent.prompts.sys_prompts import SYS_ACTION_GEN, SYS_VERIFY
-from agent.prompts.user_prompt import build_action_prompt, build_verification_prompt
+import re
+from typing import Dict, List, Set
+
+from agent.prompts.sys_prompts import (
+    SYS_ACTION_QA,
+    SYS_ACTION_SORT,
+    SYS_VERIFY_QA,
+    SYS_VERIFY_SORT,
+    VALID_FOLDERS_STR,
+)
+from agent.prompts.user_prompt import (
+    build_qa_action_prompt,
+    build_qa_verification_prompt,
+    build_sort_action_prompt,
+    build_sort_verification_prompt,
+)
 from agent.state import InnerState
 from clients.competition_client import APIClient
 from clients.llm_client import LLMService
 from config import config
 from core.logger import get_logger
 from core.checkpoint import load_parsed_text_cache, save_parsed_text_cache
-from models.llm_schemas import QAAnswerSchema, VerificationResponse
+from models.llm_schemas import QAAnswerSchema, SortActionResponse, VerificationResponse
 from tools.context_manager import format_context_from_documents, format_full_context, get_or_create_file_summary
 from tools.document_parser import parse_resource_bytes
 from tools.rag_engine import build_and_retrieve_context
@@ -15,6 +29,33 @@ from tools.rag_engine import build_and_retrieve_context
 llm_service = None
 api_client = None
 logger = get_logger(__name__)
+
+
+def _parse_valid_folders(raw_text: str) -> Set[str]:
+    folders: Set[str] = set()
+    for line in raw_text.splitlines():
+        cleaned = line.strip()
+        if not cleaned:
+            continue
+        if "." in cleaned:
+            _, maybe_name = cleaned.split(".", 1)
+            cleaned = maybe_name.strip()
+        if cleaned:
+            folders.add(cleaned)
+    return folders
+
+
+VALID_FOLDERS: Set[str] = _parse_valid_folders(VALID_FOLDERS_STR)
+FOLDER_LINE_PATTERN = re.compile(r"^\s*Folder:\s*(.+?)\s*$", re.IGNORECASE)
+
+
+def _extract_selected_folders_from_thought_log(thought_log: str) -> List[str]:
+    selected: List[str] = []
+    for line in thought_log.splitlines():
+        match = FOLDER_LINE_PATTERN.match(line)
+        if match:
+            selected.append(match.group(1).strip())
+    return selected
 
 
 def _get_llm_service() -> LLMService:
@@ -134,31 +175,59 @@ def action_generation_node(state: InnerState) -> dict:
         state.get("attempts", 0) + 1,
     )
 
-    context = state["retrieved_context"]
     feedback = state.get("verification_feedback", "")
 
+    # Folder task type
     if state["task_type"] == "folder-organisation":
         file_summaries = {doc["file_path"]: doc["summary"] for doc in state.get("parsed_documents", [])}
-        response = _get_llm_service().generate_folder_response(
+        prompt = build_sort_action_prompt(
             prompt_template=state.get("prompt_template", ""),
             file_summaries=file_summaries,
+            feedback=feedback,
+            planning_hints=state.get("planning_hints", ""),
         )
+        draft_response = _get_llm_service().generate_action_response(
+            system_prompt=SYS_ACTION_SORT,
+            user_prompt=prompt,
+            response_model=SortActionResponse,
+        )
+
+        formatted_thought_log = (draft_response.overall_thought_log or "").strip()
+        if formatted_thought_log:
+            formatted_thought_log += "\n\nSorting Details:\n"
+        else:
+            formatted_thought_log = "Sorting Details:\n"
+
+        for decision in draft_response.decisions:
+            formatted_thought_log += (
+                f"- File: {decision.file_path}\n"
+                f"  Folder: {decision.selected_folder}\n"
+                f"  Reasoning: {decision.reasoning}\n\n"
+            )
+
+        response_payload = {
+            "answers": [],
+            "thought_log": formatted_thought_log.strip(),
+            "used_tools": state.get("used_tools", []),
+            "confidence": float(draft_response.confidence),
+        }
         return {
-            "draft_answer": response,
-            "action_plan": response,
-            "confidence_score": float(response.get("confidence", 0.0)),
+            "draft_answer": response_payload,
+            "action_plan": response_payload,
+            "confidence_score": float(draft_response.confidence),
         }
 
-    prompt = build_action_prompt(
-        task_type=state["task_type"],
+    # QA task type
+    context = state["retrieved_context"]
+    prompt = build_qa_action_prompt(
         prompt_template=state.get("prompt_template", ""),
         context=context,
         feedback=feedback,
         planning_hints=state.get("planning_hints", ""),
     )
 
-    draft_response = _get_llm_service().generate_structured(
-        system_prompt=SYS_ACTION_GEN,
+    draft_response = _get_llm_service().generate_action_response(
+        system_prompt=SYS_ACTION_QA,
         user_prompt=prompt,
         response_model=QAAnswerSchema,
     )
@@ -180,19 +249,52 @@ def verifiability_node(state: InnerState) -> dict:
 
     if state["task_type"] == "folder-organisation":
         draft = state["draft_answer"]
-        confidence = float(state.get("confidence_score", draft.get("confidence", 0.0)) or 0.0)
-        answers = draft.get("answers", [])
-        
-        # Light verification: Kiểm tra xem có sinh ra được answer nào không và điểm confidence có đạt mức tối thiểu không
-        is_valid = len(answers) > 0 and confidence >= config.VERIFIER_MIN_CONFIDENCE
-        feedback = ""
-        if not is_valid:
+        file_summaries = {doc["file_path"]: doc.get("summary", "") for doc in state.get("parsed_documents", [])}
+        prompt = build_sort_verification_prompt(
+            prompt_template=state.get("prompt_template", ""),
+            draft_answer=draft,
+            file_summaries=file_summaries,
+        )
+        verification = _get_llm_service().generate_verification_response(
+            system_prompt=SYS_VERIFY_SORT,
+            user_prompt=prompt,
+            response_model=VerificationResponse,
+            max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,
+        )
+
+        confidence = float(verification.confidence)
+        verified_thought_log = verification.thought_log.strip() or draft.get("thought_log", "")
+        next_answer = {
+            "answers": [],
+            "thought_log": verified_thought_log,
+            "used_tools": verification.used_tools or draft.get("used_tools", []),
+            "confidence": confidence,
+        }
+
+        selected_folders = _extract_selected_folders_from_thought_log(next_answer["thought_log"])
+        invalid_folders = sorted({folder for folder in selected_folders if folder not in VALID_FOLDERS})
+
+        if invalid_folders:
             feedback = (
-                f"Folder verification failed: answers={len(answers)}, "
-                f"confidence={confidence:.3f}, required_confidence={config.VERIFIER_MIN_CONFIDENCE:.3f}."
+                "Invalid folder(s) detected: "
+                f"{', '.join(invalid_folders)}. "
+                "Use only folders listed in VALID_FOLDERS_STR."
             )
-        
+            is_valid = False
+        else:
+            is_valid = (
+                bool(selected_folders)
+                and confidence >= config.VERIFIER_MIN_CONFIDENCE
+            )
+            feedback = ""
+            if not is_valid:
+                feedback = (
+                    f"Folder verification failed: selected_folders={len(selected_folders)}, "
+                    f"confidence={confidence:.3f}, required_confidence={config.VERIFIER_MIN_CONFIDENCE:.3f}."
+                )
+
         return {
+            "draft_answer": next_answer,
             "confidence_score": confidence,
             "is_verified": is_valid,
             "verification_feedback": feedback,
@@ -201,13 +303,13 @@ def verifiability_node(state: InnerState) -> dict:
 
     draft = state["draft_answer"]
     context = state["retrieved_context"]
-    prompt = build_verification_prompt(
+    prompt = build_qa_verification_prompt(
         prompt_template=state.get("prompt_template", ""),
         draft_answer=draft,
         context=context,
     )
-    verification = _get_llm_service().generate_structured(
-        system_prompt=SYS_VERIFY,
+    verification = _get_llm_service().generate_verification_response(
+        system_prompt=SYS_VERIFY_QA,
         user_prompt=prompt,
         response_model=VerificationResponse,
         max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,

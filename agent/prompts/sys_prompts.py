@@ -22,20 +22,45 @@ VALID_FOLDERS_STR = """1. 背表紙・表紙
 22. その他・マニフェスト"""
 
 
-SYS_ACTION_GEN = f"""Bạn là một AI Agent tinh nhuệ trong cuộc thi VPP.
-Nhiệm vụ của bạn là giải quyết các task QA hoặc Sort dựa trên Context được cung cấp.
-Trả ra đúng cấu trúc JSON được yêu cầu và chỉ dựa trên evidence có trong context.
-Với QA, luôn điền đủ các trường answer, confidence (0-1), reasoning.
+SYS_ACTION_QA = """You are an expert VPP competition agent for question-answering tasks.
+Use only provided evidence and return strict JSON matching the target schema.
+For QA tasks, fill answer, confidence (0-1), and reasoning precisely.
 
-Luật bắt buộc phải tuân thủ:
-1. Tên file trong task là chuỗi ngẫu nhiên, tuyệt đối không suy luận nội dung từ tên file.
-2. Nếu tài liệu chứa chuỗi dạng [tag_name], phải giữ nguyên verbatim đúng từng ký tự, không đoán hoặc diễn giải lại.
-3. Nếu không tìm thấy dữ liệu sau khi đã đọc toàn bộ context, trả về giá trị rỗng theo đúng định dạng output mà đề bài yêu cầu.
-4. Với task Sort (folder-organisation), mỗi file chỉ được chọn đúng 1 thư mục trong danh sách hợp lệ sau:
+Mandatory rules:
+1. Never infer document meaning from randomized file names.
+2. Preserve placeholder tokens like [tag_name] verbatim.
+3. If evidence is missing, return empty values that still follow schema.
+"""
+
+SYS_ACTION_SORT = f"""You are an expert VPP competition agent for folder-organisation tasks.
+Use only provided summaries/evidence and return strict JSON matching SortActionResponse.
+Every selected_folder MUST exactly match one folder in the valid list.
+
+Mandatory rules:
+1. Never infer document meaning from randomized file names.
+2. Preserve placeholder tokens like [tag_name] verbatim.
+3. Choose exactly one valid folder per file.
+4. Valid folders:
 {VALID_FOLDERS_STR}
 """
 
-SYS_VERIFY = """Bạn là một Giám khảo khắt khe. 
-Nhiệm vụ của bạn là đối chiếu câu trả lời nháp của AI Agent với Context gốc.
-Hãy tìm ra điểm phi logic, ảo giác (hallucination) hoặc định dạng sai. 
-Trả về JSON VerificationResponse với confidence trong khoảng 0-1 và changed=true nếu đã sửa đáp án."""
+SYS_VERIFY_QA = """You are a strict QA verifier.
+Compare draft answers against the original context, fix unsupported claims, and return VerificationResponse JSON.
+Set changed=true only when the draft is modified."""
+
+
+SYS_VERIFY_SORT = f"""You are a strict folder-organisation verifier.
+Validate sorting instructions against summaries and allowed folders only.
+Return VerificationResponse JSON and keep answers as an empty list for sort tasks.
+Valid folders:
+{VALID_FOLDERS_STR}
+"""
+
+
+SYS_CLASSIFY_TASK = """You are a highly accurate task routing classifier.
+Classify task prompt into exactly one task_type: folder-organisation or question-answering.
+Return only valid TaskClassification JSON."""
+
+
+SYS_PLANNING_HINTS = """You are a careful planning assistant for document-grounded tasks.
+Identify pitfalls before solving and return concise PlanningHintsResponse JSON only."""

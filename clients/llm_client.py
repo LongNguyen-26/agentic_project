@@ -12,10 +12,8 @@ from pydantic import BaseModel, ValidationError
 from config import config
 from core.logger import get_logger
 from models.llm_schemas import (
-    ActionPlanResponse,
     PlanningHintsResponse,
     TaskClassification,
-    VerificationResponse,
 )
 
 
@@ -256,20 +254,8 @@ class LLMService:
             raise last_exc
         raise RuntimeError("LLM call failed without exception details")
 
-    def classify_task_type(self, prompt_template: str) -> str:
-        """Classify task type from Japanese/English prompt templates."""
-        system_prompt = """You are a highly accurate task routing classifier.
-Your job is to analyze a prompt (usually in Japanese) and classify it into exactly one of two task types:
-
-1. "folder-organisation": The prompt asks the agent to sort, categorize, organize, or move files into specific folders/categories. 
-   Keywords to look out for in Japanese: 仕分け (sorting), フォルダ (folder), 分類 (classification/categorization), 整理 (organizing), 振り分け (distribution).
-2. "question-answering": The prompt asks a specific question, requests data extraction, or asks for a summary.
-   Keywords to look out for in Japanese: 抽出 (extract), 教えて (tell me), 何ですか (what is), 答えて (answer).
-
-Return ONLY a valid JSON object with a single key "task_type". The value MUST be either "folder-organisation" or "question-answering". Do not include any other keys or text."""
-
-        user_prompt = f"Prompt Template to classify:\n{prompt_template}"
-
+    def classify_task_type(self, *, system_prompt: str, user_prompt: str) -> str:
+        """Classify task type using caller-provided prompts."""
         try:
             response = self._chat_with_retries(
                 response_model=TaskClassification,
@@ -285,20 +271,8 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
             logger.warning("[llm] Task classification failed; defaulting to question-answering", exc_info=True)
             return "question-answering"
 
-    def extract_planning_hints(self, prompt_template: str) -> str:
-        """Extract concise planning hints before entering the inner task graph."""
-        system_prompt = (
-            "You are a careful planning assistant for document-grounded tasks. "
-            "Identify pitfalls before solving. Return JSON only."
-        )
-        user_prompt = (
-            "Read the task prompt and extract warnings for execution.\n"
-            "Focus on: required output format, redacted placeholders, missing-value convention, "
-            "possible calculations/units, and ambiguous terms.\n"
-            "Return concise hints only, do not solve the task.\n\n"
-            f"Task prompt:\n{prompt_template}"
-        )
-
+    def extract_planning_hints(self, *, system_prompt: str, user_prompt: str) -> str:
+        """Extract concise planning hints using caller-provided prompts."""
         try:
             response = self._chat_with_retries(
                 response_model=PlanningHintsResponse,
@@ -324,6 +298,42 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
             parts.append(f"Luu y tong quat: {caution}")
         return "\n".join(parts)
 
+    def generate_action_response(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: Type[BaseModel],
+        max_completion_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
+    ) -> BaseModel:
+        """Standardized action generation wrapper around structured LLM output."""
+        return self.generate_structured(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+
+    def generate_verification_response(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: Type[BaseModel],
+        max_completion_tokens: Optional[int] = None,
+        reasoning_effort: Optional[str] = None,
+    ) -> BaseModel:
+        """Standardized verification generation wrapper around structured LLM output."""
+        return self.generate_structured(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=response_model,
+            max_completion_tokens=max_completion_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+
     def generate_structured(
         self,
         *,
@@ -344,120 +354,6 @@ Return ONLY a valid JSON object with a single key "task_type". The value MUST be
             temperature=config.TEMPERATURE,
             reasoning_effort=reasoning_effort,
         )
-
-    def generate_action_plan_and_answer(self, *, prompt_template: str, retrieved_evidence: list, task_type: str) -> dict:
-        evidence_block = self._build_evidence_block(retrieved_evidence)
-
-        system_prompt = (
-            "You are an expert AI agent in a document-grounded simulation. "
-            "Use only supplied evidence. Return JSON keys: "
-            "answers (list[str]), thought_log (str), used_tools (list[str]), confidence (float 0-1)."
-        )
-        user_prompt = (
-            f"Task type: {task_type}\n"
-            f"Prompt template:\n{prompt_template}\n\n"
-            f"Retrieved evidence:\n{evidence_block}\n\n"
-            "Create the best possible answer with concise reasoning that references evidence."
-        )
-
-        try:
-            response = self._chat_with_retries(
-                response_model=ActionPlanResponse,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=1.0,
-                max_completion_tokens=config.LLM_MAX_OUTPUT_TOKENS,
-            )
-            return response.model_dump(mode="json")
-        except ValidationError as e:
-            logger.warning("[llm] Action response validation failed", exc_info=True)
-            return ActionPlanResponse(thought_log=f"ValidationError: {e}").model_dump(mode="json")
-        except Exception as e:
-            logger.error("[llm] Action generation failed", exc_info=True)
-            return ActionPlanResponse(thought_log=f"Error: {e}").model_dump()
-    def verify_and_correct(
-        self,
-        *,
-        prompt_template: str,
-        candidate_answers: List[str],
-        candidate_thought_log: str,
-        retrieved_evidence: List[Dict[str, Any]],
-    ) -> dict:
-        evidence_block = self._build_evidence_block(retrieved_evidence)
-
-        system_prompt = (
-            "You are an expert AI agent in a document-grounded simulation. "
-            "Use only supplied evidence to verify and correct the initial answer. Return JSON keys: "
-            "answers (list[str]), thought_log (str), used_tools (list[str]), confidence (float 0-1), changed (bool)."
-        )
-        user_prompt = (
-            f"Task type: question-answering\n"
-            f"Prompt template:\n{prompt_template}\n\n"
-            f"Initial answers:\n{json.dumps(candidate_answers, ensure_ascii=False)}\n\n"
-            f"Initial thought_log:\n{candidate_thought_log}\n\n"
-            f"Retrieved evidence:\n{evidence_block}\n\n"
-            "Verify if the initial answer is correct. If not, provide a corrected answer with concise reasoning that references evidence."
-        )
-
-        try:
-            response = self._chat_with_retries(
-                response_model=VerificationResponse,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=1.0,
-                max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,
-            )
-            return response.model_dump(mode="json")
-        except ValidationError as e:
-            logger.warning("[llm] Verification response validation failed", exc_info=True)
-            return VerificationResponse(thought_log=f"ValidationError: {e}").model_dump(mode="json")
-        except Exception as e:
-            logger.error("[llm] Verification generation failed", exc_info=True)
-            return VerificationResponse(thought_log=f"Error: {e}").model_dump()
-        
-    def generate_folder_response(self, *, prompt_template: str, file_summaries: Dict[str, str]) -> dict:
-        retrieved_evidence = [
-            {
-                "content": content,
-                "metadata": {"file_path": path},
-            }
-            for path, content in file_summaries.items()
-        ]
-        evidence_block = self._build_evidence_block(retrieved_evidence)
-
-        system_prompt = (
-            "You are an expert AI agent in a document-grounded simulation. "
-            "Use only supplied evidence to generate folder organization instructions. Return JSON keys: "
-            "answers (list[str]), thought_log (str), used_tools (list[str]), confidence (float 0-1)."
-        )
-        user_prompt = (
-            f"Task type: folder-organisation\n"
-            f"Prompt template:\n{prompt_template}\n\n"
-            f"Retrieved evidence:\n{evidence_block}\n\n"
-            "You are provided with a list of file paths and their concise summaries. Generate precise instructions for how to organize these files into the valid folders based on the prompt. Pay close attention to the document types mentioned in the summaries."
-        )
-
-        try:
-            response = self._chat_with_retries(
-                response_model=ActionPlanResponse,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=1.0,
-                max_completion_tokens=config.LLM_MAX_OUTPUT_TOKENS,
-            )
-            return response.model_dump(mode="json")
-        except ValidationError as e:
-            logger.warning("[llm] Folder response validation failed", exc_info=True)
-            return ActionPlanResponse(thought_log=f"ValidationError: {e}").model_dump(mode="json")
-        except Exception as e:
-            logger.error("[llm] Folder response generation failed", exc_info=True)
-            return ActionPlanResponse(thought_log=f"Error: {e}").model_dump()
 
 
 # Backward compatible alias.

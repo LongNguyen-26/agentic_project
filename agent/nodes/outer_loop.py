@@ -1,5 +1,7 @@
 # agent/nodes/outer_loop.py
 from agent.state import OuterState
+from agent.prompts.sys_prompts import SYS_CLASSIFY_TASK, SYS_PLANNING_HINTS
+from agent.prompts.user_prompt import build_planning_hints_prompt, build_task_classification_prompt
 from clients.competition_client import APIClient
 from clients.llm_client import LLMService
 from core.checkpoint import _persist_session_checkpoint
@@ -67,7 +69,10 @@ def fetch_task_node(state: OuterState) -> dict:
         # 2. Fallback sang LLM nếu không khớp luật
         else:
             logger.info("[task] Missing task type from API, classifying via LLM...")
-            task_type = _get_llm_service().classify_task_type(prompt_template)
+            task_type = _get_llm_service().classify_task_type(
+                system_prompt=SYS_CLASSIFY_TASK,
+                user_prompt=build_task_classification_prompt(prompt_template),
+            )
     # ========================================
     # KẾT THÚC ĐOẠN SỬA
     
@@ -88,7 +93,10 @@ def planning_node(state: OuterState) -> dict:
         return {"planning_hints": ""}
 
     logger.info("[planning] Extracting pre-execution hints for task_id=%s", task.get("id"))
-    hints = _get_llm_service().extract_planning_hints(prompt_template)
+    hints = _get_llm_service().extract_planning_hints(
+        system_prompt=SYS_PLANNING_HINTS,
+        user_prompt=build_planning_hints_prompt(prompt_template),
+    )
     return {"planning_hints": hints}
 
 def submit_node(state: OuterState) -> dict:
