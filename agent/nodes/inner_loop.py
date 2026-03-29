@@ -263,7 +263,15 @@ def verifiability_node(state: InnerState) -> dict:
         )
 
         confidence = float(verification.confidence)
-        verified_thought_log = verification.thought_log.strip() or draft.get("thought_log", "")
+
+        original_thought_log = draft.get("thought_log", "").strip()
+        verifier_log = verification.thought_log.strip()
+
+        if verifier_log:
+            verified_thought_log = f"{original_thought_log}\n\n[Verification]: {verifier_log}"
+        else:
+            verified_thought_log = original_thought_log
+
         next_answer = {
             "answers": [],
             "thought_log": verified_thought_log,
