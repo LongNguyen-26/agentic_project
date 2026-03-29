@@ -104,6 +104,10 @@ def _parse_pdf_text_fallback(pdf_bytes: bytes) -> str:
 
 def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
     """Tier 2 helper: OCR image bytes using local Ollama multimodal model."""
+    if not config.OLLAMA_BASE_URL or not config.LOCAL_VISION_MODEL:
+        logger.warning("[parser] Tier 2 local OCR skipped: missing OLLAMA_BASE_URL or LOCAL_VISION_MODEL")
+        return ""
+
     prompt = (
         "Trich xuat day du noi dung van ban, bang bieu va thong tin ky thuat trong anh tai lieu xay dung. "
         "Doi voi du lieu dang bang, hay trinh bay duoi dang Markdown Table de giu nguyen cau truc cot hang. "
@@ -144,6 +148,10 @@ def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
 
 def _parse_pdf_with_ollama(pdf_bytes: bytes) -> str:
     """Tier 2: render PDF pages and OCR locally with Ollama."""
+    if not config.OLLAMA_BASE_URL:
+        logger.warning("[parser] Tier 2 local OCR skipped: missing OLLAMA_BASE_URL")
+        return ""
+
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     if doc.page_count == 0:
         return ""
