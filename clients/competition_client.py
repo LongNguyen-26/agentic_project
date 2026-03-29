@@ -154,7 +154,7 @@ class APIClient:
         return {
             "id": task.task_id,
             "task_id": task.task_id,
-            "type": task.type or "question-answering",
+            "type": task.type,
             "prompt_template": task.prompt_template,
             "resources": resources,
         }

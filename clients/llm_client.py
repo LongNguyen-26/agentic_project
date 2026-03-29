@@ -264,7 +264,7 @@ class LLMService:
                     {"role": "user", "content": user_prompt}
                 ],
                 max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS, 256),
-                temperature=1.0,
+                temperature=0.0,
             )
             return response.task_type
         except Exception:

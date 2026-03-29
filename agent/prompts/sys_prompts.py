@@ -57,9 +57,15 @@ Valid folders:
 """
 
 
-SYS_CLASSIFY_TASK = """You are a highly accurate task routing classifier.
-Classify task prompt into exactly one task_type: folder-organisation or question-answering.
-Return only valid TaskClassification JSON."""
+# Mở file agent/prompts/sys_prompts.py, sửa biến SYS_CLASSIFY_TASK
+SYS_CLASSIFY_TASK = """You are a highly accurate task routing classifier for a document processing agent.
+Classify the given task prompt into exactly one of the two following task_types:
+
+1. "folder-organisation": Select this if the prompt asks to sort, organize, classify files into specific folders, or match documents to a given list of folder categories (e.g., "Sort these files", "フォルダへ配置").
+2. "question-answering": Select this if the prompt asks to extract specific information, answer questions based on the text, find dates/values, or perform data extraction (e.g., "Find the commissioning date", "What is the total capacity?").
+
+Return only valid TaskClassification JSON.
+"""
 
 
 SYS_PLANNING_HINTS = """You are a careful planning assistant for document-grounded tasks.

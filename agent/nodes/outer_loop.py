@@ -63,7 +63,13 @@ def fetch_task_node(state: OuterState) -> dict:
     # === TÍCH HỢP LOGIC PHÂN LOẠI TẠI ĐÂY ===
     if not task_type:
         # 1. Bước lọc đầu (Rule-based)
-        if "フォルダへ配置" in prompt_template:
+        prompt_lower = prompt_template.lower()
+        folder_keywords = [
+            "フォルダへ配置", "フォルダに分類", "仕分け", # Tiếng Nhật
+            "folder", "sort", "organize", "organise", "classify" # Tiếng Anh
+        ]
+        
+        if any(keyword in prompt_lower for keyword in folder_keywords):
             logger.info("[task] Fast classification: 'folder-organisation' (rule-based matched)")
             task_type = "folder-organisation"
         # 2. Fallback sang LLM nếu không khớp luật
