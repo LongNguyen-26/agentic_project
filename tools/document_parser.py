@@ -1,8 +1,10 @@
 import base64
+import io
 import mimetypes
 from typing import List, Optional
 
 import fitz
+import pdfplumber
 import requests
 from openai import OpenAI
 
@@ -53,21 +55,58 @@ def _normalize_image_for_vision(image_bytes: bytes, mime: str) -> tuple[bytes, s
         return image_bytes, mime
 
 
+def _extract_tables_with_pdfplumber(pdf_bytes: bytes) -> str:
+    """Helper function: Sử dụng pdfplumber để trích xuất bảng biểu thành định dạng Markdown."""
+    table_text_parts = []
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for i, page in enumerate(pdf.pages):
+                tables = page.extract_tables()
+                for table_idx, table in enumerate(tables):
+                    table_text_parts.append(f"\n### Bảng {table_idx + 1} (Trang {i + 1})\n")
+                    for row_idx, row in enumerate(table):
+                        # Làm sạch dữ liệu trong từng ô (xóa newline)
+                        clean_row = [str(cell).replace('\n', ' ').strip() if cell else "" for cell in row]
+                        row_str = "| " + " | ".join(clean_row) + " |"
+                        table_text_parts.append(row_str)
+                        # Thêm dòng phân cách Markdown header sau dòng đầu tiên
+                        if row_idx == 0:
+                            separator = "| " + " | ".join(["---"] * len(clean_row)) + " |"
+                            table_text_parts.append(separator)
+                    table_text_parts.append("\n")
+    except Exception as e:
+        logger.warning(f"[parser] Lỗi khi trích xuất bảng với pdfplumber: {e}")
+    
+    return "\n".join(table_text_parts).strip()
+
+
 def _parse_pdf_text_fallback(pdf_bytes: bytes) -> str:
-    """Tier 1: extract text layer from PDF with PyMuPDF."""
+    """Tier 1: extract text layer from PDF with PyMuPDF & extract tables with pdfplumber."""
+    # Trích xuất Text cơ bản bằng fitz
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     parts: List[str] = []
     for page in doc:
         text = (page.get_text("text") or "").strip()
         if text:
             parts.append(text)
-    return "\n".join(parts).strip()
+    
+    base_text = "\n".join(parts).strip()
+
+    # Nâng cấp: Trích xuất bảng bằng pdfplumber
+    tables_text = _extract_tables_with_pdfplumber(pdf_bytes)
+    
+    # Kết hợp Text và Bảng để giữ nguyên Context
+    if tables_text:
+        base_text += "\n\n--- DỮ LIỆU BẢNG BIỂU ĐƯỢC TRÍCH XUẤT ---\n" + tables_text
+
+    return base_text
 
 
 def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
     """Tier 2 helper: OCR image bytes using local Ollama multimodal model."""
     prompt = (
-        "Trich xuat day du noi dung van ban va thong tin ky thuat trong anh tai lieu xay dung. "
+        "Trich xuat day du noi dung van ban, bang bieu va thong tin ky thuat trong anh tai lieu xay dung. "
+        "Doi voi du lieu dang bang, hay trinh bay duoi dang Markdown Table de giu nguyen cau truc cot hang. "
         "Giu nguyen don vi, so lieu, ma hieu va tieu de."
     )
     payload = {
@@ -76,21 +115,7 @@ def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
         "images": [_encode_image(image_bytes)],
         "stream": False,
     }
-    # try:
-    #     response = requests.post(
-    #         f"{config.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
-    #         json=payload,
-    #         timeout=config.LOCAL_VISION_TIMEOUT_SECONDS,
-    #     )
-    #     response.raise_for_status()
-    #     data = response.json()
-    #     text = str(data.get("response", "")).strip()
-    #     if text:
-    #         logger.info("[parser] Tier 2 local OCR success chars=%d mime=%s", len(text), mime)
-    #     return text
-    # except Exception:
-    #     logger.warning("[parser] Tier 2 local OCR failed", exc_info=True)
-    #     return ""
+
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
@@ -158,6 +183,7 @@ def _parse_pdf_with_openai(pdf_bytes: bytes) -> str:
             "text": (
                 "Extract all useful text and technical details from these construction document pages. "
                 "Keep numbers, units, model codes, and field labels exactly."
+                "CRITICAL: If you detect any tabular data, you MUST return it as a formatted Markdown table to preserve the row and column structure."
             ),
         }
     ]
@@ -201,7 +227,10 @@ def _parse_image_with_openai(image_bytes: bytes, mime: str) -> str:
                     "content": [
                         {
                             "type": "text",
-                            "text": "Extract visible text and key details from this construction document image.",
+                            "text": (
+                                "Extract visible text and key details from this construction document image."
+                                "CRITICAL: If you detect any tabular data, you MUST return it as a formatted Markdown table to preserve the row and column structure."
+                            ),
                         },
                         {
                             "type": "image_url",

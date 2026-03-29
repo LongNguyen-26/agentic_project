@@ -30,19 +30,6 @@ class LLMService:
         self.client = instructor.from_openai(OpenAI(api_key=config.OPENAI_API_KEY))
         self.reasoning_model = config.MODEL_REASONING_ID
 
-    def _build_evidence_block(self, retrieved_evidence: List[Dict[str, Any]]) -> str:
-        max_items = max(config.EVIDENCE_MAX_ITEMS, 1)
-        max_chars = max(config.EVIDENCE_MAX_CHARS_PER_ITEM, 200)
-        compact_items = retrieved_evidence[:max_items]
-
-        lines: List[str] = []
-        for idx, item in enumerate(compact_items, start=1):
-            metadata = item.get("metadata", {}) or {}
-            file_hint = metadata.get("file_path") or metadata.get("category_name") or "unknown"
-            content = (item.get("content") or "")[:max_chars]
-            lines.append(f"[Evidence #{idx}] source={file_hint}\n{content}")
-        return "\n\n".join(lines)
-
     def _chat_with_retries(
         self,
         *,
