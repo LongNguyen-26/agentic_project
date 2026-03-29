@@ -11,6 +11,21 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Settings:
+	"""Centralized runtime configuration loaded from environment variables.
+
+	Operationally important knobs:
+	- QA_RAG_DOC_THRESHOLD:
+	  Controls when QA tasks switch from full-context mode to hybrid retrieval mode.
+	  Larger values reduce retrieval overhead for small tasks; smaller values favor retrieval
+	  earlier when many resources are attached.
+	- VERIFIER_MIN_CONFIDENCE:
+	  Confidence gate for self-correction. Higher values enforce stricter acceptance but can
+	  increase retries; lower values reduce retries but may accept weaker outputs.
+	- MAX_RETRIES:
+	  Hard limit for self-correction loops in verifiability routing.
+	- LLM_MAX_OUTPUT_TOKENS / VERIFICATION_MAX_OUTPUT_TOKENS:
+	  Upper bounds for model outputs to reduce truncation and overflow risk.
+	"""
 	# ── Competition server ─────────────────────────────────────────────────────
 	BASE_URL: str = os.getenv("COMPETITION_BASE_URL", "")
 	API_KEY: str = os.getenv("API_KEY", "")
@@ -52,6 +67,7 @@ class Settings:
 	LOCAL_VISION_TIMEOUT_SECONDS: float = float(os.getenv("LOCAL_VISION_TIMEOUT_SECONDS", "90"))
 
 	# ── QA Retrieval and Verification ───────────────────────────────────────────
+	# Number of attached documents required before QA switches to RAG branch.
 	QA_RAG_DOC_THRESHOLD: int = int(os.getenv("QA_RAG_DOC_THRESHOLD", "5"))
 
 	RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
@@ -61,7 +77,9 @@ class Settings:
 	EVIDENCE_MAX_ITEMS: int = int(os.getenv("EVIDENCE_MAX_ITEMS", "5"))
 	EVIDENCE_MAX_CHARS_PER_ITEM: int = int(os.getenv("EVIDENCE_MAX_CHARS_PER_ITEM", "1200"))
 
+	# Maximum correction loops allowed by verification router.
 	MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
+	# Minimum confidence to pass verification without another retry.
 	VERIFIER_MIN_CONFIDENCE: float = float(os.getenv("VERIFIER_MIN_CONFIDENCE", "0.60"))
 
 
