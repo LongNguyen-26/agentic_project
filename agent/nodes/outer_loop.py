@@ -54,8 +54,22 @@ def fetch_task_node(state: OuterState) -> dict:
         logger.info("[loop] No tasks returned by server")
         return {"current_task": None, "planning_hints": "", "should_continue": False}
 
-    task_type = task.get("type") or "question-answering"
+    # BẮT ĐẦU ĐOẠN SỬA: Lấy task_type từ API, nếu không có thì dùng LLM để phân loại
+    task_type = task.get("type")
     prompt_template = task.get("prompt_template", "")
+    
+    # === TÍCH HỢP LOGIC PHÂN LOẠI TẠI ĐÂY ===
+    if not task_type:
+        # 1. Bước lọc đầu (Rule-based)
+        if "フォルダへ配置" in prompt_template:
+            logger.info("[task] Fast classification: 'folder-organisation' (rule-based matched)")
+            task_type = "folder-organisation"
+        # 2. Fallback sang LLM nếu không khớp luật
+        else:
+            logger.info("[task] Missing task type from API, classifying via LLM...")
+            task_type = _get_llm_service().classify_task_type(prompt_template)
+    # ========================================
+    # KẾT THÚC ĐOẠN SỬA
     
     # ---> THÊM DÒNG LOG NÀY <---
     short_prompt = (prompt_template[:100] + "...") if len(prompt_template) > 100 else prompt_template
