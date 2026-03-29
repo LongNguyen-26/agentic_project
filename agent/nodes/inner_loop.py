@@ -107,7 +107,11 @@ def setup_rag_node(state: InnerState) -> dict:
     """Khi QA có nhiều tài liệu, dùng RAG để lấy ngữ cảnh trọng tâm."""
     logger.info("[Context] Using RAG retrieval for task_id=%s", state.get("task_id"))
     query = state.get("prompt_template", "")
-    context = build_and_retrieve_context(state["parsed_text"], query, top_k=config.RAG_TOP_K)
+    
+    # SỬA Ở ĐÂY: Truyền parsed_documents thay vì parsed_text
+    parsed_documents = state.get("parsed_documents", [])
+    context = build_and_retrieve_context(parsed_documents, query, top_k=config.RAG_TOP_K)
+    
     used_tools = list(state.get("used_tools", []))
     used_tools.append("rag_engine")
     return {"retrieved_context": context, "used_tools": used_tools}

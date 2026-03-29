@@ -1,3 +1,4 @@
+from typing import List, Dict, Any
 from langchain_text_splitters import MarkdownTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
@@ -18,24 +19,44 @@ embeddings = (
     else None
 )
 
-def build_and_retrieve_context(full_text: str, query: str, top_k: int = 5) -> str:
+def build_and_retrieve_context(parsed_documents: List[Dict[str, Any]], query: str, top_k: int = 5) -> str:
     """
     Hàm chính được gọi bởi Node RAG.
-    Chia nhỏ văn bản và tìm top K chunks liên quan nhất với query bằng Hybrid Search (BM25 + FAISS).
+    Chia nhỏ văn bản của từng file, gắn metadata (tên file, tóm tắt) vào mỗi chunk,
+    sau đó tìm top K chunks liên quan nhất với query bằng Hybrid Search.
     """
-    if not full_text.strip():
+    if not parsed_documents:
         return ""
 
-    logger.debug("[rag] Splitting text into chunks")
+    logger.debug("[rag] Splitting text into chunks with metadata")
     text_splitter = MarkdownTextSplitter(
         chunk_size=config.RAG_CHUNK_SIZE,
         chunk_overlap=config.RAG_CHUNK_OVERLAP,
     )
-    chunks = text_splitter.split_text(full_text)
     
-    # 1. Khởi tạo Retriever tìm kiếm từ khóa (BM25)
+    enhanced_chunks = []
+    
+    # Duyệt qua từng tài liệu để chunking và gắn metadata
+    for doc in parsed_documents:
+        file_path = doc.get("file_path", "unknown")
+        summary = doc.get("summary", "").strip()
+        text = doc.get("text", "")
+        
+        if not text.strip():
+            continue
+            
+        doc_chunks = text_splitter.split_text(text)
+        for chunk in doc_chunks:
+            # Gắn bối cảnh (Metadata) vào đầu mỗi chunk
+            meta_prefix = f"[Nguồn: {file_path} - Tóm tắt: {summary}]\n"
+            enhanced_chunks.append(meta_prefix + chunk)
+
+    if not enhanced_chunks:
+        return ""
+
+    # 1. Khởi tạo Retriever tìm kiếm từ khóa (BM25) với enhanced_chunks
     logger.debug("[rag] Building BM25 retriever")
-    bm25_retriever = BM25Retriever.from_texts(chunks)
+    bm25_retriever = BM25Retriever.from_texts(enhanced_chunks)
     bm25_retriever.k = top_k
 
     # Nếu không có API Key cho Embeddings, chỉ sử dụng BM25
@@ -51,7 +72,7 @@ def build_and_retrieve_context(full_text: str, query: str, top_k: int = 5) -> st
     # 2. Khởi tạo Retriever tìm kiếm ngữ nghĩa (FAISS Vector Search)
     try:
         logger.debug("[rag] Building FAISS index with OpenAI embeddings")
-        vectorstore = FAISS.from_texts(chunks, embeddings)
+        vectorstore = FAISS.from_texts(enhanced_chunks, embeddings)
         faiss_retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
         
         # 3. Kết hợp bằng EnsembleRetriever (Hybrid Search)
