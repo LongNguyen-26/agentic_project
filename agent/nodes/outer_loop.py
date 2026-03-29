@@ -68,10 +68,18 @@ def fetch_task_node(state: OuterState) -> dict:
             "フォルダへ配置", "フォルダに分類", "仕分け", # Tiếng Nhật
             "folder", "sort", "organize", "organise", "classify" # Tiếng Anh
         ]
-        
+        # Thêm từ khóa cho QA task dựa trên prompt mẫu
+        qa_keywords = [
+            "特定し", "確認せよ", "取扱説明書", "注意事項", # Tiếng Nhật
+            "question", "answer", "extract", "identify", "confirm" # Tiếng Anh
+        ]
+
         if any(keyword in prompt_lower for keyword in folder_keywords):
             logger.info("[task] Fast classification: 'folder-organisation' (rule-based matched)")
             task_type = "folder-organisation"
+        elif any(keyword in prompt_lower for keyword in qa_keywords):
+            logger.info("[task] Fast classification: 'question-answering' (rule-based matched)")
+            task_type = "question-answering"
         # 2. Fallback sang LLM nếu không khớp luật
         else:
             logger.info("[task] Missing task type from API, classifying via LLM...")
