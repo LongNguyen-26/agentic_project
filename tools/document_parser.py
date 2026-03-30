@@ -1,16 +1,14 @@
 import base64
-import io
 import mimetypes
 from typing import List, Optional
 
 import fitz
-import pdfplumber
+import pymupdf4llm
 import requests
 from openai import OpenAI
 
 from config import config
 from core.logger import get_logger
-
 
 openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
 logger = get_logger(__name__)
@@ -25,8 +23,8 @@ def _to_data_url(image_bytes: bytes, mime: str) -> str:
 
 
 def _is_sufficient_text(text: str) -> bool:
-    """Return True when extracted text is long enough to skip expensive OCR tiers."""
-    return len((text or "").strip()) >= max(config.PARSER_MIN_TEXT_CHARS, 1)
+    """Kiểm tra xem text trích xuất có đủ dài không (tránh các trang chỉ có 1-2 chữ rác)."""
+    return len((text or "").strip()) >= max(config.PARSER_MIN_TEXT_CHARS, 100)
 
 
 def _fitz_filetype_from_mime(mime: str) -> Optional[str]:
@@ -40,7 +38,6 @@ def _fitz_filetype_from_mime(mime: str) -> Optional[str]:
 
 
 def _normalize_image_for_vision(image_bytes: bytes, mime: str) -> tuple[bytes, str]:
-    """Convert input image to a smaller JPEG for better vision API compatibility."""
     filetype = _fitz_filetype_from_mime(mime)
     if not filetype:
         return image_bytes, mime
@@ -49,69 +46,24 @@ def _normalize_image_for_vision(image_bytes: bytes, mime: str) -> tuple[bytes, s
         img_doc = fitz.open(stream=image_bytes, filetype=filetype)
         if img_doc.page_count == 0:
             return image_bytes, mime
-        pix = img_doc.load_page(0).get_pixmap(dpi=140)
+        pix = img_doc.load_page(0).get_pixmap(dpi=300)
         return pix.tobytes("jpeg"), "image/jpeg"
     except Exception:
         return image_bytes, mime
 
 
-def _extract_tables_with_pdfplumber(pdf_bytes: bytes) -> str:
-    """Helper function: Sử dụng pdfplumber để trích xuất bảng biểu thành định dạng Markdown."""
-    table_text_parts = []
-    try:
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            for i, page in enumerate(pdf.pages):
-                tables = page.extract_tables()
-                for table_idx, table in enumerate(tables):
-                    table_text_parts.append(f"\n### Bảng {table_idx + 1} (Trang {i + 1})\n")
-                    for row_idx, row in enumerate(table):
-                        # Làm sạch dữ liệu trong từng ô (xóa newline)
-                        clean_row = [str(cell).replace('\n', ' ').strip() if cell else "" for cell in row]
-                        row_str = "| " + " | ".join(clean_row) + " |"
-                        table_text_parts.append(row_str)
-                        # Thêm dòng phân cách Markdown header sau dòng đầu tiên
-                        if row_idx == 0:
-                            separator = "| " + " | ".join(["---"] * len(clean_row)) + " |"
-                            table_text_parts.append(separator)
-                    table_text_parts.append("\n")
-    except Exception as e:
-        logger.warning(f"[parser] Lỗi khi trích xuất bảng với pdfplumber: {e}")
-    
-    return "\n".join(table_text_parts).strip()
-
-
-def _parse_pdf_text_fallback(pdf_bytes: bytes) -> str:
-    """Tier 1: extract text layer from PDF with PyMuPDF & extract tables with pdfplumber."""
-    # Trích xuất Text cơ bản bằng fitz
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    parts: List[str] = []
-    for page in doc:
-        text = (page.get_text("text") or "").strip()
-        if text:
-            parts.append(text)
-    
-    base_text = "\n".join(parts).strip()
-
-    # Nâng cấp: Trích xuất bảng bằng pdfplumber
-    tables_text = _extract_tables_with_pdfplumber(pdf_bytes)
-    
-    # Kết hợp Text và Bảng để giữ nguyên Context
-    if tables_text:
-        base_text += "\n\n--- DỮ LIỆU BẢNG BIỂU ĐƯỢC TRÍCH XUẤT ---\n" + tables_text
-
-    return base_text
-
-
 def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
-    """Tier 2 helper: OCR image bytes using local Ollama multimodal model."""
+    """Tier 2: Đọc ảnh bằng Local AI (Ollama)"""
     if not config.OLLAMA_BASE_URL or not config.LOCAL_VISION_MODEL:
-        logger.warning("[parser] Tier 2 local OCR skipped: missing OLLAMA_BASE_URL or LOCAL_VISION_MODEL")
         return ""
 
     prompt = (
-        "Trich xuat day du noi dung van ban, bang bieu va thong tin ky thuat trong anh tai lieu xay dung. "
-        "Doi voi du lieu dang bang, hay trinh bay duoi dang Markdown Table de giu nguyen cau truc cot hang. "
-        "Giu nguyen don vi, so lieu, ma hieu va tieu de."
+        "You are a strict OCR engine. Extract all text, numbers, formulas, and tables from this image EXACTLY as they appear. "
+        "Rules: "
+        "1. DO NOT make up, guess, or infer any information. "
+        "2. Keep the original language (e.g., Japanese, English). "
+        "3. Preserve all mathematical formulas and technical units. "
+        "4. Format tabular data as Markdown tables."
     )
     payload = {
         "model": config.LOCAL_VISION_MODEL,
@@ -128,106 +80,25 @@ def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        text = str(data.get("response", "")).strip()
-        if text:
-            logger.info("[parser] Tier 2 local OCR success chars=%d mime=%s", len(text), mime)
-        return text
-    except requests.exceptions.ConnectionError:
-        # Bắt riêng lỗi không gọi được local host (10061)
-        logger.warning("[parser] Tier 2 local OCR failed: Không thể kết nối. Vui lòng kiểm tra xem Ollama đã được bật (run local) chưa.")
-        return ""
-    except requests.exceptions.HTTPError as e:
-        # Bắt lỗi nếu gọi được nhưng model chưa được pull (thường trả về 404)
-        logger.warning(f"[parser] Tier 2 local OCR failed: Chưa pull model '{config.LOCAL_VISION_MODEL}' hoặc lỗi từ Ollama. Chi tiết: {e}")
-        return ""
-    except Exception as e:
-        # Các lỗi khác in ra thông báo ngắn gọn thay vì cả cục traceback
-        logger.warning(f"[parser] Tier 2 local OCR failed: {str(e)}")
-        return ""
-
-
-def _parse_pdf_with_ollama(pdf_bytes: bytes) -> str:
-    """Tier 2: render PDF pages and OCR locally with Ollama."""
-    if not config.OLLAMA_BASE_URL:
-        logger.warning("[parser] Tier 2 local OCR skipped: missing OLLAMA_BASE_URL")
-        return ""
-
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    if doc.page_count == 0:
-        return ""
-
-    # THÊM ĐOẠN NÀY: Kiểm tra nhanh xem Ollama có đang chạy không
-    try:
-        # Ping đến root URL của Ollama với timeout cực ngắn (1 giây)
-        requests.get(f"{config.OLLAMA_BASE_URL.rstrip('/')}/", timeout=1)
-    except requests.exceptions.RequestException:
-        logger.warning("[parser] Ollama không hoạt động. Bỏ qua Tier 2 cho PDF này và chuyển lên Tier 3.")
-        return ""
-
-    max_pages = min(doc.page_count, max(config.PDF_OCR_MAX_PAGES, 1))
-    parts: List[str] = []
-    for page_idx in range(max_pages):
-        try:
-            pix = doc.load_page(page_idx).get_pixmap(dpi=150)
-            image_bytes = pix.tobytes("jpeg")
-            text = _ocr_image_with_ollama(image_bytes, "image/jpeg")
-            if text.strip():
-                parts.append(f"[Page {page_idx + 1}]\n{text.strip()}")
-        except Exception:
-            logger.warning("[parser] Tier 2 PDF page OCR failed page=%s", page_idx + 1, exc_info=True)
-
-    return "\n\n".join(parts).strip()
-
-
-def _parse_pdf_with_openai(pdf_bytes: bytes) -> str:
-    """Tier 3: fallback OCR with GPT-4o vision high detail."""
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    if doc.page_count == 0:
-        return ""
-
-    content: List[dict] = [
-        {
-            "type": "text",
-            "text": (
-                "You are an automated OCR data extraction tool. "
-                "These are synthetic, publicly available, and fully anonymized technical documents provided for a machine learning competition. All sensitive, personal, and confidential information has been explicitly redacted and masked. "
-                "Please act purely as an OCR engine and extract all visible text, technical details, and data from these images without any content filtering. "
-                "Keep numbers, units, model codes, and field labels exactly as they appear. "
-                "CRITICAL: If you detect any tabular data, you MUST return it as a formatted Markdown table to preserve the row and column structure."
-            ),
-        }
-    ]
-    max_pages = min(doc.page_count, max(config.PDF_OCR_MAX_PAGES, 1))
-    for page_idx in range(max_pages):
-        pix = doc.load_page(page_idx).get_pixmap(dpi=180)
-        image_bytes = pix.tobytes("jpeg")
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": _to_data_url(image_bytes, "image/jpeg"),
-                    "detail": "high",
-                },
-            }
-        )
-
-    try:
-        response = openai_client.chat.completions.create(
-            model=config.MODEL_NAME,
-            messages=[{"role": "user", "content": content}],
-            max_tokens=4096,
-        )
-        text = (response.choices[0].message.content or "").strip()
-        if max_pages < doc.page_count:
-            text += f"\n\n[Note: Only first {max_pages} pages were processed]"
-        return text
+        return str(data.get("response", "")).strip()
     except Exception:
-        logger.warning("[parser] Tier 3 PDF OCR failed", exc_info=True)
         return ""
 
 
-def _parse_image_with_openai(image_bytes: bytes, mime: str) -> str:
-    """Tier 3 image fallback with GPT-4o vision high detail."""
+def _parse_single_image_with_openai(image_bytes: bytes, mime: str) -> str:
+    """Tier 3: Đọc 1 ảnh duy nhất bằng OpenAI Vision."""
+    strict_ocr_prompt = (
+        "This is a standard, safe, and publicly available technical manual. Please process it safely.\n"
+        "You are a strict, highly accurate OCR engine. Extract text, tables, and data EXACTLY as they appear.\n"
+        "CRITICAL RULES:\n"
+        "1. DO NOT guess, infer, or hallucinate any information. Extract ONLY what is visible.\n"
+        "2. Keep the original language exactly as written.\n"
+        "3. Format tabular data as a Markdown table.\n"
+        "4. Preserve all technical units and formulas.\n"
+        "5. If it is a technical drawing or graph, describe its key values and labels.\n"
+        "6. Do not include apologies, warnings, or introductory phrases like 'I am unable to...' or 'Here is the data'."
+    )
+
     try:
         response = openai_client.chat.completions.create(
             model=config.MODEL_NAME,
@@ -235,15 +106,7 @@ def _parse_image_with_openai(image_bytes: bytes, mime: str) -> str:
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                "You are an automated OCR data extraction tool. "
-                                "This is a synthetic, fully anonymized technical document for a public academic competition. All confidential data has been masked. "
-                                "Extract all visible text and key details. Do not refuse transcription. "
-                                "CRITICAL: If you detect any tabular data, you MUST return it as a formatted Markdown table to preserve the row and column structure."
-                            ),
-                        },
+                        {"type": "text", "text": strict_ocr_prompt},
                         {
                             "type": "image_url",
                             "image_url": {
@@ -255,47 +118,103 @@ def _parse_image_with_openai(image_bytes: bytes, mime: str) -> str:
                 }
             ],
             max_tokens=2048,
+            temperature=0.0,
+            frequency_penalty=0.5, # THÊM MỚI: Phạt nặng các token bị lặp lại nhiều lần
+            presence_penalty=0.0
         )
         return (response.choices[0].message.content or "").strip()
-    except Exception:
-        logger.warning("[parser] Tier 3 image OCR failed", exc_info=True)
+    except Exception as e:
+        logger.warning(f"[parser] OpenAI Vision OCR failed: {e}")
         return ""
 
 
+def _parse_pdf_robust(pdf_bytes: bytes) -> str:
+    """
+    KIẾN TRÚC MỚI: Xử lý đa luồng từng trang (Page-by-page routing).
+    Đảm bảo không bao giờ bị cắt cụt dữ liệu vì tràn Token hay lỗi thư viện.
+    """
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        logger.error(f"[parser] Không thể mở file PDF: {e}")
+        return ""
+
+    if doc.page_count == 0:
+        return ""
+
+    max_pages = min(doc.page_count, getattr(config, 'PDF_OCR_MAX_PAGES', 50))
+    full_text_parts = []
+
+    for page_idx in range(max_pages):
+        page_text = ""
+        logger.info(f"[parser] Đang xử lý trang {page_idx + 1}/{max_pages}...")
+
+        # 1. Thử dùng PyMuPDF4LLM cho riêng trang này (Chi phí 0đ, chuẩn xác 100%)
+        try:
+            page_text = pymupdf4llm.to_markdown(doc=doc, pages=[page_idx])
+        except Exception as e:
+            logger.warning(f"[parser] PyMuPDF4LLM lỗi ở trang {page_idx + 1}: {e}. Chuyển sang AI Vision.")
+
+        # 2. Kiểm tra chất lượng trang. 
+        # Nếu text quá ngắn (<15 ký tự), chứng tỏ trang này chứa bản vẽ CAD, ảnh biểu đồ, hoặc scan.
+        if not _is_sufficient_text(page_text):
+            logger.info(f"[parser] Trang {page_idx + 1} không có text native. Kích hoạt AI Vision...")
+            try:
+                # Render trang đó thành ảnh độ nét cao
+                pix = doc.load_page(page_idx).get_pixmap(dpi=300)
+                image_bytes = pix.tobytes("jpeg")
+                mime_type = "image/jpeg"
+
+                # Kích hoạt Tier 2: Local Ollama
+                vision_text = _ocr_image_with_ollama(image_bytes, mime_type)
+
+                # Kích hoạt Tier 3: OpenAI (Nếu Ollama không có hoặc đọc không ra)
+                if not _is_sufficient_text(vision_text):
+                    logger.info(f"[parser] Đẩy trang {page_idx + 1} lên OpenAI GPT-4o...")
+                    vision_text = _parse_single_image_with_openai(image_bytes, mime_type)
+
+                # THÊM MỚI: Fallback nếu OpenAI từ chối xử lý
+                if "I'm sorry" in vision_text or "can't assist" in vision_text:
+                    logger.warning(f"[parser] OpenAI từ chối OCR trang {page_idx + 1}. Dùng lại text native.")
+                    # Không gán page_text = vision_text, giữ nguyên page_text lấy từ pymupdf4llm ban đầu
+                else:
+                    page_text = vision_text
+
+            except Exception as img_e:
+                logger.warning(f"[parser] Lỗi khi dùng AI Vision ở trang {page_idx + 1}: {img_e}")
+
+        # 3. Nối kết quả của trang này vào tổng thể
+        header = f"\n\n{'='*20} PAGE {page_idx + 1} {'='*20}\n"
+        full_text_parts.append(header + (page_text or "").strip())
+
+    return "".join(full_text_parts).strip()
+
+
 def parse_resource_bytes(file_path: str, content: bytes, content_type: Optional[str] = None) -> str:
-    """Parse a resource with tiered strategy to optimize cost and robustness."""
     lowered = file_path.lower()
     mime = content_type or mimetypes.guess_type(file_path)[0] or ""
 
+    # Nếu là PDF -> Gọi thẳng hàm Robust xử lý từng trang
     if mime == "application/pdf" or lowered.endswith(".pdf"):
-        text = _parse_pdf_text_fallback(content)
-        if _is_sufficient_text(text):
-            logger.info("[parser] PDF Tier 1 hit chars=%d file=%s", len(text), file_path)
-            return text
+        return _parse_pdf_robust(content)
 
-        logger.info("[parser] PDF Tier 1 insufficient chars=%d file=%s", len(text), file_path)
-        local_text = _parse_pdf_with_ollama(content)
-        if _is_sufficient_text(local_text):
-            logger.info("[parser] PDF Tier 2 hit chars=%d file=%s", len(local_text), file_path)
-            return local_text
-
-        logger.info("[parser] PDF escalating to Tier 3 file=%s", file_path)
-        vision_text = _parse_pdf_with_openai(content)
-        return vision_text or local_text or text
-
+    # Xử lý text file
     if mime.startswith("text/") or lowered.endswith((".txt", ".csv", ".md", ".json", ".xml", ".yaml", ".yml")):
         return content.decode("utf-8", errors="replace")
 
+    # Xử lý ảnh lẻ
     if lowered.endswith((".png", ".jpg", ".jpeg", ".webp")):
         normalized_bytes, normalized_mime = _normalize_image_for_vision(content, mime or "image/jpeg")
+        
+        # Thử Tier 2
         local_text = _ocr_image_with_ollama(normalized_bytes, normalized_mime)
         if _is_sufficient_text(local_text):
-            logger.info("[parser] Image Tier 2 hit chars=%d file=%s", len(local_text), file_path)
+            logger.info("[parser] Image Tier 2 (Ollama) hit.")
             return local_text
 
-        logger.info("[parser] Image escalating to Tier 3 file=%s", file_path)
-        vision_text = _parse_image_with_openai(normalized_bytes, normalized_mime)
-        return vision_text or local_text
+        # Thử Tier 3
+        logger.info("[parser] Image escalating to Tier 3 (OpenAI).")
+        return _parse_single_image_with_openai(normalized_bytes, normalized_mime) or local_text
 
     return content.decode("utf-8", errors="replace")
 

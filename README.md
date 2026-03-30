@@ -1,7 +1,7 @@
-# VPP AI Agent (LangGraph)
+# AI Agent (LangGraph)
 
 ## 🚀 Overview
-This project is an AI Agent for the **VPP AI Agent Challenge**.
+This project is an AI Agent for the **AI Agent Challenge**.
 
 It automates two task families from the competition server:
 - **question-answering**: extract grounded answers from as-built project documents.
@@ -29,7 +29,7 @@ Optional local vision setup:
 If Ollama is not reachable, the parser automatically degrades to Tier-3 vision OCR (OpenAI).
 
 ## 📦 Installation
-From the `vpp_agent_project_2` directory:
+From the directory:
 
 ```bash
 # 1) Create and activate your virtual environment

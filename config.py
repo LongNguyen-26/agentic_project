@@ -62,8 +62,8 @@ class Settings:
 	LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))
 	VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("VERIFICATION_MAX_OUTPUT_TOKENS", "1200"))
 	
-	PARSER_MIN_TEXT_CHARS: int = int(os.getenv("PARSER_MIN_TEXT_CHARS", "80"))
-	PDF_OCR_MAX_PAGES: int = int(os.getenv("PDF_OCR_MAX_PAGES", "20"))
+	PARSER_MIN_TEXT_CHARS: int = int(os.getenv("PARSER_MIN_TEXT_CHARS", "100"))
+	PDF_OCR_MAX_PAGES: int = int(os.getenv("PDF_OCR_MAX_PAGES", "30"))
 	LOCAL_VISION_TIMEOUT_SECONDS: float = float(os.getenv("LOCAL_VISION_TIMEOUT_SECONDS", "90"))
 
 	# ── QA Retrieval and Verification ───────────────────────────────────────────
