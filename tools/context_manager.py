@@ -1,6 +1,7 @@
 # tools/context_manager.py
 
 import hashlib
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -47,8 +48,9 @@ def _cache_key(file_path: str, raw_text: str) -> str:
 
 
 def _clean_text(raw_text: str) -> str:
-    """Normalize whitespace to reduce prompt token usage."""
-    return " ".join(raw_text.split())
+    """Normalize whitespace to reduce prompt token usage but PRESERVE NEWLINES."""
+    # Chỉ gom các dấu cách và tab thừa thành 1 dấu cách, KHÔNG xóa \n
+    return re.sub(r'[ \t]+', ' ', raw_text)
 
 
 def _fallback_summary(file_path: str, raw_text: str) -> str:
@@ -102,7 +104,7 @@ def get_or_create_file_summary(
             f"File path: {file_path}\n"
             "Generate a concise summary containing document metadata clues, key entities, "
             "numbers/dates, and the main purpose. Keep factual and avoid speculation.\n\n"
-            f"Content:\n{cleaned[:6000]}"
+            f"Content:\n{cleaned[:30000]}"
         )
         try:
             response = llm_service.generate_structured(
@@ -146,7 +148,7 @@ def format_context_from_documents(parsed_documents: List[Dict[str, Any]]) -> str
             blocks.append(f"[FILE] {file_path}\n[TOM TAT]\n{summary}")
             continue
         text = _clean_text(str(doc.get("text", "")))
-        blocks.append(f"[FILE] {file_path}\n{text[:1200]}")
+        blocks.append(f"[FILE] {file_path}\n{text[:30000]}")
     joined = "\n\n".join(blocks).strip()
     return (
         "[BAT DAU NGU CANH DA NEN]\n"

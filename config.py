@@ -70,8 +70,8 @@ class Settings:
 	# Number of attached documents required before QA switches to RAG branch.
 	QA_RAG_DOC_THRESHOLD: int = int(os.getenv("QA_RAG_DOC_THRESHOLD", "5"))
 
-	RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "500"))
-	RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "50"))
+	RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
+	RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
 	RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))
 
 	EVIDENCE_MAX_ITEMS: int = int(os.getenv("EVIDENCE_MAX_ITEMS", "5"))
