@@ -31,3 +31,14 @@ visualize_graph.py
 CODEBASE_REVIEW_PHASED.md
 .pytest_cache
 test_local_parser.py
+test_local_rag.py
+test_paddleocr.py
+test_pymupdf4llm.py
+test_pymupdf4llm_2.py
+test_rapidocr.py
+fast_pdf_parser.py
+ket_qua_pymupdf4llm_2.md
+pip uninstall rapidocr-onnxruntime
+ket_qua*
+md.ipynb
+/ocr_models
