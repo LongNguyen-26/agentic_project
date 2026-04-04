@@ -1,5 +1,4 @@
 # agent/nodes/inner_loop.py
-import concurrent.futures
 import re
 from typing import Dict, List, Set
 
@@ -22,10 +21,11 @@ from clients.llm_client import LLMService
 from config import config
 from core.logger import get_logger
 from core.checkpoint import load_parsed_text_cache, save_parsed_text_cache
-from models.llm_schemas import QAAnswerSchema, SortActionResponse, VerificationResponse
+from models.llm_schemas import QAActionSchema, SortActionResponse, VerificationResponse
 from tools.context_manager import format_context_from_documents, format_full_context, get_or_create_file_summary
 from tools.document_parser import parse_resource_bytes
 from tools.rag_engine import build_and_retrieve_context
+from tools.vision_tool import analyze_images_from_cache
 
 llm_service = None
 api_client = None
@@ -85,6 +85,7 @@ def _generate_sort_action(state: InnerState, feedback: str) -> dict:
         system_prompt=SYS_ACTION_SORT,
         user_prompt=prompt,
         response_model=SortActionResponse,
+        max_completion_tokens=36000,
     )
 
     formatted_thought_log = (draft_response.overall_thought_log or "").strip()
@@ -115,6 +116,14 @@ def _generate_sort_action(state: InnerState, feedback: str) -> dict:
 
 def _generate_qa_action(state: InnerState, feedback: str) -> dict:
     context = state["retrieved_context"]
+    if state.get("tool_observations"):
+        prior_observations = "\n".join(state.get("tool_observations", []))
+        context = (
+            f"{context}\n\n"
+            "[Vision Tool Observations]\n"
+            f"{prior_observations}"
+        )
+
     prompt = build_qa_action_prompt(
         prompt_template=state.get("prompt_template", ""),
         context=context,
@@ -125,8 +134,19 @@ def _generate_qa_action(state: InnerState, feedback: str) -> dict:
     draft_response = _get_llm_service().generate_action_response(
         system_prompt=SYS_ACTION_QA,
         user_prompt=prompt,
-        response_model=QAAnswerSchema,
+        response_model=QAActionSchema,
     )
+
+    if draft_response.needs_image_analysis:
+        target_ids = [img_id.strip() for img_id in draft_response.target_image_ids if img_id.strip()]
+        if target_ids:
+            return {
+                "tool_calls": target_ids,
+                "vision_prompt": draft_response.vision_prompt.strip(),
+                "confidence_score": float(draft_response.confidence),
+            }
+        logger.warning("[Action] needs_image_analysis=True but no target_image_ids were returned")
+
     response_payload = {
         "answers": [draft_response.answer.strip()],
         "thought_log": draft_response.reasoning.strip(),
@@ -137,6 +157,8 @@ def _generate_qa_action(state: InnerState, feedback: str) -> dict:
         "draft_answer": response_payload,
         "action_plan": response_payload,
         "confidence_score": float(draft_response.confidence),
+        "tool_calls": [],
+        "vision_prompt": "",
     }
 
 
@@ -152,7 +174,8 @@ def _verify_sort(state: InnerState) -> dict:
         system_prompt=SYS_VERIFY_SORT,
         user_prompt=prompt,
         response_model=VerificationResponse,
-        max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,
+        # max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,
+        max_completion_tokens=36000,
     )
 
     confidence = float(verification.confidence)
@@ -206,6 +229,14 @@ def _verify_sort(state: InnerState) -> dict:
 def _verify_qa(state: InnerState) -> dict:
     draft = state["draft_answer"]
     context = state["retrieved_context"]
+    if state.get("tool_observations"):
+        prior_observations = "\n".join(state.get("tool_observations", []))
+        context = (
+            f"{context}\n\n"
+            "[Vision Tool Observations]\n"
+            f"{prior_observations}"
+        )
+
     prompt = build_qa_verification_prompt(
         prompt_template=state.get("prompt_template", ""),
         draft_answer=draft,
@@ -375,6 +406,46 @@ def action_generation_node(state: InnerState) -> dict:
         return _generate_sort_action(state, feedback)
 
     return _generate_qa_action(state, feedback)
+
+
+def vision_tool_node(state: InnerState) -> dict:
+    """Execute vision analysis for requested image IDs and append observation.
+
+    Args:
+        state: Trạng thái inner loop chứa tool_calls và vision_prompt.
+
+    Returns:
+        dict: Updates tool_observations and clears tool_calls to avoid infinite loop.
+    """
+    image_ids = [img_id.strip() for img_id in state.get("tool_calls", []) if img_id.strip()]
+    vision_prompt = state.get("vision_prompt", "")
+
+    if not image_ids:
+        return {
+            "tool_calls": [],
+            "vision_prompt": "",
+        }
+
+    logger.info(
+        "[VisionToolNode] task_id=%s image_count=%s",
+        state.get("task_id"),
+        len(image_ids),
+    )
+
+    try:
+        observation = analyze_images_from_cache(image_ids=image_ids, vision_prompt=vision_prompt)
+    except Exception as exc:
+        observation = f"[Vision Tool] ERROR: unexpected failure while analyzing images: {exc}"
+        logger.warning(observation)
+
+    existing_observations = list(state.get("tool_observations", []))
+    existing_observations.append(observation)
+
+    return {
+        "tool_observations": existing_observations,
+        "tool_calls": [],
+        "vision_prompt": "",
+    }
 
 def verifiability_node(state: InnerState) -> dict:
     """Tự kiểm duyệt đáp án, phát sinh feedback và quyết định trạng thái xác thực.

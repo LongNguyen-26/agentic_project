@@ -1,8 +1,9 @@
 import base64
+import hashlib
 import mimetypes
+import os
 import re
 from typing import List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import fitz
 import pymupdf4llm
@@ -14,6 +15,17 @@ from core.logger import get_logger
 
 openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
 logger = get_logger(__name__)
+IMAGE_CACHE_DIR = os.path.join(os.getcwd(), config.STORAGE_ROOT, "image_cache")
+
+
+def _save_image_to_cache(image_id: str, image_bytes: bytes) -> str:
+    """Persist image bytes to disk cache for later tool-based analysis."""
+    os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
+    image_path = os.path.join(IMAGE_CACHE_DIR, f"{image_id}.jpg")
+    if not os.path.exists(image_path):
+        with open(image_path, "wb") as cache_file:
+            cache_file.write(image_bytes)
+    return image_path
 
 
 def _encode_image(image_bytes: bytes) -> str:
@@ -177,8 +189,7 @@ def _parse_single_image_with_openai_for_charts(image_bytes: bytes, mime: str) ->
 
 def _parse_pdf_robust(pdf_bytes: bytes) -> str:
     """
-    KIẾN TRÚC MỚI: Xử lý đa luồng từng trang (Page-by-page routing) với mô hình Crop-and-Reason.
-    Sử dụng ThreadPoolExecutor để gọi OpenAI song song cho tất cả các ảnh hợp lệ trong PDF.
+    Parse PDF by pages and lazily cache images as placeholders for later ReAct tool calls.
     """
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -191,84 +202,55 @@ def _parse_pdf_robust(pdf_bytes: bytes) -> str:
 
     max_pages = min(doc.page_count, getattr(config, 'PDF_OCR_MAX_PAGES', 50))
     full_text_parts = []
-    
-    # Gom tất cả các task xử lý ảnh trên mọi trang
-    image_tasks = []
-    # Dictionary lưu trữ kết quả phân tích ảnh theo index trang
-    page_vision_results = {i: [] for i in range(max_pages)}
 
-    for page_idx in range(max_pages):
-        page = doc[page_idx]
-        image_list = page.get_images(full=True)
-        
-        for img in image_list:
-            xref = img[0]
-            base_image = doc.extract_image(xref)
-            if not base_image:
-                continue
-                
-            width = base_image.get("width", 0)
-            height = base_image.get("height", 0)
-            
-            # ==========================================
-            # Image Gatekeeper (Filter Cải tiến)
-            # ==========================================
-            # Bỏ qua ảnh quá nhỏ (< 100px ở cả 2 chiều) hoặc nhiễu
-            if width < 100 or height < 100:
-                continue
-                
-            if height == 0: 
-                continue
-                
-            aspect_ratio = width / height
-            # Bỏ qua các đường thẳng kẻ vạch, border (tỷ lệ quá lệch)
-            if aspect_ratio > 10 or aspect_ratio < 0.1:
-                continue
-            
-            image_bytes = base_image["image"]
-            ext = base_image.get("ext", "jpeg")
-            mime_type = f"image/{ext}"
-            
-            # Đưa vào danh sách chờ xử lý song song
-            image_tasks.append({
-                'page_idx': page_idx,
-                'image_bytes': image_bytes,
-                'mime_type': mime_type,
-                'width': width,
-                'height': height
-            })
-
-    # Xử lý song song bằng ThreadPoolExecutor (Giảm thời gian từ O(N) xuống O(1) dựa theo max_workers)
-    if image_tasks:
-        logger.info(f"[parser] Kích hoạt Multithreading Vision cho {len(image_tasks)} hình ảnh hợp lệ...")
-        with ThreadPoolExecutor(max_workers=min(10, len(image_tasks))) as executor:
-            future_to_task = {
-                executor.submit(_parse_single_image_with_openai_for_charts, task['image_bytes'], task['mime_type']): task 
-                for task in image_tasks
-            }
-            
-            for future in as_completed(future_to_task):
-                task = future_to_task[future]
-                try:
-                    vision_desc = future.result()
-                    if vision_desc:
-                        page_vision_results[task['page_idx']].append(vision_desc)
-                        logger.info(f"[parser] Hoàn thành phân tích ảnh trang {task['page_idx'] + 1} (w:{task['width']}, h:{task['height']}).")
-                except Exception as exc:
-                    logger.warning(f"[parser] Phân tích ảnh trang {task['page_idx'] + 1} thất bại: {exc}")
-
-    # Lắp ráp lại văn bản cho từng trang
     for page_idx in range(max_pages):
         logger.info(f"[parser] Đang render nội dung trang {page_idx + 1}/{max_pages}...")
+        page = doc[page_idx]
         try:
             page_text = pymupdf4llm.to_markdown(doc=doc, pages=[page_idx])
         except Exception as e:
             logger.warning(f"[parser] PyMuPDF4LLM lỗi ở trang {page_idx + 1}: {e}.")
             page_text = ""
 
-        # Gắn kết quả phân tích biểu đồ/ảnh vào nội dung trang tương ứng
-        for vision_desc in page_vision_results[page_idx]:
-            page_text += f"\n\n> **[Mô tả Biểu đồ/Bản vẽ từ AI]**:\n> {vision_desc}\n"
+        placeholders: List[str] = []
+        image_list = page.get_images(full=True)
+
+        for img in image_list:
+            try:
+                xref = img[0]
+                base_image = doc.extract_image(xref)
+                if not base_image:
+                    continue
+
+                width = base_image.get("width", 0)
+                height = base_image.get("height", 0)
+
+                # Bỏ qua ảnh quá nhỏ hoặc nhiễu hình học.
+                if width < 100 or height < 100:
+                    continue
+
+                if height == 0:
+                    continue
+
+                aspect_ratio = width / height
+                if aspect_ratio > 10 or aspect_ratio < 0.1:
+                    continue
+
+                image_bytes = base_image["image"]
+                ext = base_image.get("ext", "jpeg")
+                mime_type = f"image/{ext}"
+
+                image_id = hashlib.sha256(image_bytes).hexdigest()[:16]
+                normalized_bytes, _ = _normalize_image_for_vision(image_bytes, mime_type)
+                _save_image_to_cache(image_id, normalized_bytes)
+
+                placeholder = f"[IMAGE_PLACEHOLDER | ID: {image_id} | Size: {width}x{height}]"
+                placeholders.append(placeholder)
+            except Exception as exc:
+                logger.warning(f"[parser] Không thể cache ảnh ở trang {page_idx + 1}: {exc}")
+
+        if placeholders:
+            page_text = (page_text or "").strip() + "\n\n" + "\n".join(placeholders)
 
         header = f"\n\n{'='*20} PAGE {page_idx + 1} {'='*20}\n"
         full_text_parts.append(header + (page_text or "").strip())

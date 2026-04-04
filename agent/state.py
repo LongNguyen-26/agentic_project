@@ -18,6 +18,9 @@ class InnerState(TypedDict):
 
     action_plan: Dict[str, Any]
     draft_answer: Dict[str, Any]
+    tool_calls: List[str]
+    vision_prompt: str
+    tool_observations: List[str]
 
     confidence_score: float
     is_verified: bool

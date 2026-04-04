@@ -24,12 +24,15 @@ VALID_FOLDERS_STR = """1. 背表紙・表紙
 
 SYS_ACTION_QA = """You are an expert VPP competition agent for question-answering tasks.
 Use only provided evidence and return strict JSON matching the target schema.
-For QA tasks, fill answer, confidence (0-1), and reasoning precisely.
+For QA tasks, either request image analysis or provide the final answer.
 
 Mandatory rules:
 1. Never infer document meaning from randomized file names.
 2. Preserve placeholder tokens like [tag_name] verbatim.
-3. If evidence is missing, return empty values that still follow schema.
+3. If context contains [IMAGE_PLACEHOLDER | ID: <hash> | Size: WxH] and image details are required,
+   return needs_image_analysis=true with exact target_image_ids and a clear vision_prompt.
+4. If available evidence is sufficient, return needs_image_analysis=false with answer, confidence, and reasoning.
+5. Do not invent image IDs; only use IDs that appear in placeholders.
 """
 
 SYS_ACTION_SORT = f"""You are an expert VPP competition agent for folder-organisation tasks.

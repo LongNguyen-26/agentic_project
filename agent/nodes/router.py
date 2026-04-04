@@ -45,6 +45,20 @@ def check_verification(state: InnerState) -> str:
     )
     return "retry"
 
+
+def route_after_action(state: InnerState) -> str:
+    """Route after action generation based on whether a tool call is needed.
+
+    Args:
+        state: Trạng thái inner loop sau action_generation.
+
+    Returns:
+        str: "call_vision_tool" nếu có tool_calls, ngược lại "verifiability".
+    """
+    if state.get("tool_calls"):
+        return "call_vision_tool"
+    return "verifiability"
+
 def route_outer_loop(state: OuterState) -> str:
     """Điều hướng vòng lặp ngoài sang xử lý task hoặc kết thúc.
 

@@ -30,6 +30,8 @@ dry_run_submit_payload.json
 visualize_graph.py
 CODEBASE_REVIEW_PHASED.md
 .pytest_cache
+test_docling.py
+test_marker.py
 test_local_parser.py
 test_local_rag.py
 test_paddleocr.py

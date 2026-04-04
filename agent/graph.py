@@ -28,19 +28,24 @@ Luồng tổng quan:
                 +-------------------+
                 | action_generation |
                 +-------------------+
-                                    |
-                                    v
-                     +---------------+
-                     | verifiability |
-                     +---------------+
-                                    |
-                                    v
-                    check_verification
-                         |         |
-                        pass     retry
-                         |         |
-                         v         +------> action_generation
-                        END
+                          |
+                          v
+                  route_after_action
+                    |              |
+                    v              v
+              +-------------+  +---------------+
+              | vision_tool |  | verifiability |
+              +-------------+  +---------------+
+                    |              |
+                    +------>-------+
+                          |
+                          v
+                   check_verification
+                      |         |
+                     pass     retry
+                      |         |
+                      v         +------> action_generation
+                     END
 """
 
 from langgraph.graph import StateGraph, END
@@ -54,10 +59,11 @@ from .nodes.inner_loop import (
     setup_rag_node, 
     setup_context_manager_node, 
     action_generation_node, 
-    verifiability_node
+    verifiability_node,
+    vision_tool_node,
 )
 from .nodes.outer_loop import auth_node, fetch_task_node, planning_node, submit_node
-from .nodes.router import route_rag_or_context, check_verification, route_outer_loop
+from .nodes.router import route_rag_or_context, check_verification, route_after_action, route_outer_loop
 
 
 logger = get_logger(__name__)
@@ -72,6 +78,7 @@ inner_workflow.add_node("observability", observability_node)
 inner_workflow.add_node("setup_rag", setup_rag_node)
 inner_workflow.add_node("setup_context", setup_context_manager_node)
 inner_workflow.add_node("action_generation", action_generation_node)
+inner_workflow.add_node("vision_tool", vision_tool_node)
 inner_workflow.add_node("verifiability", verifiability_node)
 
 # Định nghĩa Luồng (Edges)
@@ -91,8 +98,18 @@ inner_workflow.add_conditional_edges(
 inner_workflow.add_edge("setup_rag", "action_generation")
 inner_workflow.add_edge("setup_context", "action_generation")
 
-# Action Generation -> Verifiability
-inner_workflow.add_edge("action_generation", "verifiability")
+# Action Generation -> Vision Tool hoặc Verifiability
+inner_workflow.add_conditional_edges(
+    "action_generation",
+    route_after_action,
+    {
+        "call_vision_tool": "vision_tool",
+        "verifiability": "verifiability",
+    }
+)
+
+# ReAct loop: Tool observation -> Action Generation
+inner_workflow.add_edge("vision_tool", "action_generation")
 
 # Vòng lặp Self-Correction (Verifiability -> Action Generation)
 inner_workflow.add_conditional_edges(
@@ -137,6 +154,9 @@ def process_task_node(state: OuterState) -> dict:
         "retrieved_context": "",
         "action_plan": {},
         "draft_answer": {},
+        "tool_calls": [],
+        "vision_prompt": "",
+        "tool_observations": [],
         "confidence_score": 0.0,
         "verification_feedback": "",
         "used_tools": [],

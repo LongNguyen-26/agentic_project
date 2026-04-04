@@ -24,6 +24,26 @@ class QAAnswerSchema(BaseModel):
     reasoning: str = Field(default="")
 
 
+class QAActionSchema(BaseModel):
+    """QA action schema supporting either tool-call or final answer path."""
+
+    needs_image_analysis: bool = Field(
+        default=False,
+        description="True when the model requires image analysis before final answer.",
+    )
+    target_image_ids: List[str] = Field(
+        default_factory=list,
+        description="Image IDs selected from IMAGE_PLACEHOLDER tokens.",
+    )
+    vision_prompt: str = Field(
+        default="",
+        description="Prompt/question to ask the vision tool about selected images.",
+    )
+    answer: str = Field(default="")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reasoning: str = Field(default="")
+
+
 class ActionPlanResponse(BaseModel):
     answers: List[str] = Field(default_factory=list)
     thought_log: str = Field(default="")
