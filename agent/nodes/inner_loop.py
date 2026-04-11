@@ -3,6 +3,8 @@ import re
 from typing import Dict, List, Set
 from collections import Counter
 
+from langfuse import observe
+
 from agent.prompts.sys_prompts import (
     SYS_ACTION_QA,
     SYS_ACTION_SORT,
@@ -180,6 +182,8 @@ def _generate_sort_action(state: InnerState, feedback: str) -> dict:
         user_prompt=prompt,
         response_model=SortActionResponse,
         max_completion_tokens=_resolve_sort_action_max_tokens(state),
+        session_id=state.get("session_id"),
+        task_id=state.get("task_id"),
     )
 
     formatted_thought_log = (draft_response.overall_thought_log or "").strip()
@@ -257,6 +261,8 @@ def _generate_qa_action(state: InnerState, feedback: str) -> dict:
         system_prompt=SYS_ACTION_QA,
         user_prompt=prompt,
         response_model=QAActionSchema,
+        session_id=state.get("session_id"),
+        task_id=state.get("task_id"),
     )
 
     if draft_response.needs_image_analysis:
@@ -303,6 +309,8 @@ def _verify_sort(state: InnerState) -> dict:
         user_prompt=prompt,
         response_model=VerificationResponse,
         max_completion_tokens=_resolve_sort_verification_max_tokens(state),
+        session_id=state.get("session_id"),
+        task_id=state.get("task_id"),
     )
 
     confidence = float(verification.confidence)
@@ -405,6 +413,8 @@ def _verify_qa(state: InnerState) -> dict:
         user_prompt=prompt,
         response_model=VerificationResponse,
         max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,
+        session_id=state.get("session_id"),
+        task_id=state.get("task_id"),
     )
 
     changed = verification.changed
@@ -486,6 +496,8 @@ def observability_node(state: InnerState) -> dict:
             file_path=file_path,
             raw_text=text,
             llm_service=_get_llm_service(),
+            session_id=state.get("session_id"),
+            task_id=state.get("task_id"),
         )
         parsed_documents.append(
             {
@@ -543,6 +555,7 @@ def setup_context_manager_node(state: InnerState) -> dict:
     used_tools.append("context_manager")
     return {"retrieved_context": context, "used_tools": used_tools}
 
+@observe(name="action_generation_node", as_type="generation", capture_input=False, capture_output=False)
 def action_generation_node(state: InnerState) -> dict:
     """Sinh đáp án theo task_type và trả về structured output cho bước kiểm duyệt.
 
@@ -610,6 +623,7 @@ def vision_tool_node(state: InnerState) -> dict:
         "used_tools": used_tools,
     }
 
+@observe(name="verifiability_node", as_type="generation", capture_input=False, capture_output=False)
 def verifiability_node(state: InnerState) -> dict:
     """Tự kiểm duyệt đáp án, phát sinh feedback và quyết định trạng thái xác thực.
 

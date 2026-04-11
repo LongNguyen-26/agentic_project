@@ -80,6 +80,8 @@ def get_or_create_file_summary(
     file_path: str,
     raw_text: str,
     llm_service: Any,
+    session_id: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> Tuple[str, bool]:
     """Get cached file summary or create a fresh 3-5 sentence summary.
 
@@ -112,6 +114,8 @@ def get_or_create_file_summary(
                 user_prompt=user_prompt,
                 response_model=FileSummaryResponse,
                 max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS * 6, 256),
+                session_id=session_id,
+                task_id=task_id,
             )
             summary = response.summary.strip() or _fallback_summary(file_path=file_path, raw_text=cleaned)
         except Exception:

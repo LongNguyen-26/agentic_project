@@ -100,6 +100,8 @@ def fetch_task_node(state: OuterState) -> dict:
             task_type = _get_llm_service().classify_task_type(
                 system_prompt=SYS_CLASSIFY_TASK,
                 user_prompt=build_task_classification_prompt(prompt_template),
+                session_id=state.get("session_id"),
+                task_id=task.get("id"),
             )
     # ========================================
     # KẾT THÚC ĐOẠN SỬA
@@ -131,6 +133,8 @@ def planning_node(state: OuterState) -> dict:
     hints = _get_llm_service().extract_planning_hints(
         system_prompt=SYS_PLANNING_HINTS,
         user_prompt=build_planning_hints_prompt(prompt_template),
+        session_id=state.get("session_id"),
+        task_id=task.get("id"),
     )
     return {"planning_hints": hints}
 

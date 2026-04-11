@@ -49,6 +49,7 @@ Luồng tổng quan:
 """
 
 from langgraph.graph import StateGraph, END
+from langfuse import observe, propagate_attributes
 
 from core.logger import get_logger
 from .state import InnerState, OuterState
@@ -127,6 +128,7 @@ inner_app = inner_workflow.compile()
 # ==========================================
 # 2. BỌC INNER GRAPH VÀO 1 NODE CỦA OUTER GRAPH
 # ==========================================
+@observe(name="process_task_node", as_type="span", capture_input=False, capture_output=False)
 def process_task_node(state: OuterState) -> dict:
     """Cầu nối outer loop để thực thi inner loop cho một task cụ thể.
 
@@ -137,12 +139,15 @@ def process_task_node(state: OuterState) -> dict:
         dict: task_result đã được tổng hợp từ draft_answer cuối của inner loop.
     """
     task = state["current_task"]
-    logger.info("[task] Processing task_id=%s type=%s", task.get("id"), task.get("type"))
+    task_id = str(task.get("id") or "")
+    task_type = str(task.get("type") or "question-answering")
+    session_id = state.get("session_id")
+    logger.info("[task] Processing task_id=%s type=%s", task_id, task_type)
 
     # Khởi tạo trạng thái cho vòng lặp trong
     initial_inner_state = {
-        "task_id": task.get("id"),
-        "task_type": task.get("type") or "question-answering",
+        "task_id": task_id,
+        "task_type": task_type,
         "prompt_template": task.get("prompt_template", ""),
         "planning_hints": state.get("planning_hints", ""),
         "session_id": state.get("session_id"),
@@ -164,8 +169,21 @@ def process_task_node(state: OuterState) -> dict:
         "is_verified": False,
     }
 
+    propagate_kwargs = {
+        "metadata": {
+            "taskId": task_id,
+            "taskType": task_type,
+        }
+    }
+    if session_id:
+        propagate_kwargs["session_id"] = str(session_id)
+    if task_id:
+        propagate_kwargs["tags"] = [f"task:{task_id}"]
+        propagate_kwargs["trace_name"] = f"task-{task_id}"
+
     # KÍCH HOẠT INNER GRAPH
-    final_inner_state = inner_app.invoke(initial_inner_state)
+    with propagate_attributes(**propagate_kwargs):
+        final_inner_state = inner_app.invoke(initial_inner_state)
 
     # Lấy đáp án cuối cùng (đã qua kiểm duyệt) trả về cho vòng lặp ngoài
     draft = final_inner_state.get("draft_answer", {})

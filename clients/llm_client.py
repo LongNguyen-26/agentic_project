@@ -1,12 +1,14 @@
 import instructor
 import json
+import os
 import random
 import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Type
 
 from instructor.core.exceptions import IncompleteOutputException, InstructorRetryException
-from openai import APIError, APITimeoutError, BadRequestError, OpenAI, RateLimitError
+from langfuse.openai import OpenAI
+from openai import APIError, APITimeoutError, BadRequestError, RateLimitError
 from pydantic import BaseModel, ValidationError
 
 from config import config
@@ -27,6 +29,15 @@ def _truncate_for_log(value: str, max_chars: int = 2000) -> str:
 
 class LLMService:
     def __init__(self):
+        # Keep Langfuse env wiring centralized in Settings while preserving runtime overrides.
+        if config.LANGFUSE_SECRET_KEY:
+            os.environ.setdefault("LANGFUSE_SECRET_KEY", config.LANGFUSE_SECRET_KEY)
+        if config.LANGFUSE_PUBLIC_KEY:
+            os.environ.setdefault("LANGFUSE_PUBLIC_KEY", config.LANGFUSE_PUBLIC_KEY)
+        if config.LANGFUSE_HOST:
+            os.environ.setdefault("LANGFUSE_HOST", config.LANGFUSE_HOST)
+            os.environ.setdefault("LANGFUSE_BASE_URL", config.LANGFUSE_HOST)
+
         self.client = instructor.from_openai(OpenAI(api_key=config.OPENAI_API_KEY))
         self.reasoning_model = config.MODEL_REASONING_ID
 
@@ -38,6 +49,8 @@ class LLMService:
         max_completion_tokens: int,
         temperature: float,
         reasoning_effort: Optional[str] = None,
+        session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> BaseModel:
         attempts = max(config.LLM_MAX_RETRIES, 1)
         base_delay = max(config.LLM_RETRY_BASE_DELAY, 0.1)
@@ -106,11 +119,13 @@ class LLMService:
                         user_prompt = str(msg.get("content") or "")
 
                 logger.debug(
-                    "[llm] Request model=%s response_model=%s attempt=%s/%s system_prompt=%s user_prompt=%s",
+                    "[llm] Request model=%s response_model=%s attempt=%s/%s session_id=%s task_id=%s system_prompt=%s user_prompt=%s",
                     self.reasoning_model,
                     response_model.__name__,
                     attempt,
                     attempts,
+                    session_id or "",
+                    task_id or "",
                     _truncate_for_log(system_prompt),
                     _truncate_for_log(user_prompt),
                 )
@@ -127,6 +142,13 @@ class LLMService:
                     request_kwargs["temperature"] = temperature
                 elif reasoning_effort:
                     request_kwargs["reasoning_effort"] = reasoning_effort
+
+                if session_id:
+                    request_kwargs["session_id"] = session_id
+                if task_id:
+                    request_kwargs["tags"] = [f"task:{task_id}"]
+                    request_kwargs["metadata"] = {"task_id": task_id}
+
                 response = self.client.chat.completions.create(**request_kwargs)
                 try:
                     response_dump = response.model_dump(mode="json")
@@ -265,7 +287,14 @@ class LLMService:
             raise last_exc
         raise RuntimeError("LLM call failed without exception details")
 
-    def classify_task_type(self, *, system_prompt: str, user_prompt: str) -> str:
+    def classify_task_type(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> str:
         """Classify task type using caller-provided prompts."""
         try:
             response = self._chat_with_retries(
@@ -276,13 +305,22 @@ class LLMService:
                 ],
                 max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS, 256),
                 temperature=0.0,
+                session_id=session_id,
+                task_id=task_id,
             )
             return response.task_type
         except Exception:
             logger.warning("[llm] Task classification failed; defaulting to question-answering", exc_info=True)
             return "question-answering"
 
-    def extract_planning_hints(self, *, system_prompt: str, user_prompt: str) -> str:
+    def extract_planning_hints(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> str:
         """Extract concise planning hints using caller-provided prompts."""
         try:
             response = self._chat_with_retries(
@@ -294,6 +332,8 @@ class LLMService:
                 max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS * 4, 256),
                 temperature=0.2,
                 reasoning_effort="high",
+                session_id=session_id,
+                task_id=task_id,
             )
         except Exception:
             logger.warning("[llm] Planning hints extraction failed; continue without hints", exc_info=True)
@@ -317,6 +357,8 @@ class LLMService:
         response_model: Type[BaseModel],
         max_completion_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
+        session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> BaseModel:
         """Standardized action generation wrapper around structured LLM output."""
         return self.generate_structured(
@@ -325,6 +367,8 @@ class LLMService:
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
             reasoning_effort=reasoning_effort,
+            session_id=session_id,
+            task_id=task_id,
         )
 
     def generate_verification_response(
@@ -335,6 +379,8 @@ class LLMService:
         response_model: Type[BaseModel],
         max_completion_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
+        session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> BaseModel:
         """Standardized verification generation wrapper around structured LLM output."""
         return self.generate_structured(
@@ -343,6 +389,8 @@ class LLMService:
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
             reasoning_effort=reasoning_effort,
+            session_id=session_id,
+            task_id=task_id,
         )
 
     def generate_structured(
@@ -353,6 +401,8 @@ class LLMService:
         response_model: Type[BaseModel],
         max_completion_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
+        session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> BaseModel:
         """Generic typed structured output call for node-level usage."""
         return self._chat_with_retries(
@@ -364,6 +414,8 @@ class LLMService:
             max_completion_tokens=max_completion_tokens or config.LLM_MAX_OUTPUT_TOKENS,
             temperature=config.TEMPERATURE,
             reasoning_effort=reasoning_effort,
+            session_id=session_id,
+            task_id=task_id,
         )
 
 

@@ -37,6 +37,12 @@ class Settings:
 	MODEL_REASONING_ID: str = os.getenv("REASONING_MODEL", "o3-mini")
 	# MODEL_REASONING_ID: str = os.getenv("REASONING_MODEL", "gpt-5.3-chat-latest")
 
+	# ── Langfuse Observability ─────────────────────────────────────────────────
+	LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+	LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+	# Backward compatible: accept LANGFUSE_BASE_URL from older env files.
+	LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+
 	# ── VLM (local OCR model) ──────────────────────────────────────────────────
 	LOCAL_VISION_MODEL: str = os.getenv("LOCAL_VISION_MODEL") or os.getenv("VLM_MODEL_NAME", "Qwen/Qwen2.5-VL-3B-Instruct")
 	OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "")
