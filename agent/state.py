@@ -25,6 +25,7 @@ class InnerState(TypedDict):
     confidence_score: float
     is_verified: bool
     verification_feedback: str
+    answer_log: str
     attempts: int
     used_tools: List[str]
 

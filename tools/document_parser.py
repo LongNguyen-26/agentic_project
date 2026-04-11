@@ -4,6 +4,7 @@ import mimetypes
 import os
 import re
 from typing import List, Optional
+import concurrent.futures
 
 import fitz
 import pymupdf4llm
@@ -187,25 +188,13 @@ def _parse_single_image_with_openai_for_charts(image_bytes: bytes, mime: str) ->
         return ""
 
 
-def _parse_pdf_robust(pdf_bytes: bytes) -> str:
-    """
-    Parse PDF by pages and lazily cache images as placeholders for later ReAct tool calls.
-    """
+def _process_pdf_page(pdf_bytes: bytes, page_idx: int) -> tuple[int, str]:
+    """Xử lý một trang PDF độc lập để chạy đa luồng."""
     try:
+        # Mỗi luồng mở một document riêng để tránh lỗi thread-safety của fitz.
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as e:
-        logger.error(f"[parser] Không thể mở file PDF: {e}")
-        return ""
-
-    if doc.page_count == 0:
-        return ""
-
-    max_pages = min(doc.page_count, getattr(config, 'PDF_OCR_MAX_PAGES', 50))
-    full_text_parts = []
-
-    for page_idx in range(max_pages):
-        logger.info(f"[parser] Đang render nội dung trang {page_idx + 1}/{max_pages}...")
         page = doc[page_idx]
+
         try:
             page_text = pymupdf4llm.to_markdown(doc=doc, pages=[page_idx])
         except Exception as e:
@@ -225,11 +214,7 @@ def _parse_pdf_robust(pdf_bytes: bytes) -> str:
                 width = base_image.get("width", 0)
                 height = base_image.get("height", 0)
 
-                # Bỏ qua ảnh quá nhỏ hoặc nhiễu hình học.
-                if width < 100 or height < 100:
-                    continue
-
-                if height == 0:
+                if width < 100 or height < 100 or height == 0:
                     continue
 
                 aspect_ratio = width / height
@@ -253,11 +238,49 @@ def _parse_pdf_robust(pdf_bytes: bytes) -> str:
             page_text = (page_text or "").strip() + "\n\n" + "\n".join(placeholders)
 
         header = f"\n\n{'='*20} PAGE {page_idx + 1} {'='*20}\n"
-        full_text_parts.append(header + (page_text or "").strip())
+        result_text = header + (page_text or "").strip()
+        doc.close()
+        return page_idx, result_text
+
+    except Exception as e:
+        logger.error(f"[parser] Lỗi xử lý trang {page_idx + 1}: {e}")
+        return page_idx, ""
+
+
+def _parse_pdf_robust(pdf_bytes: bytes) -> str:
+    """
+    Parse PDF đa luồng theo trang và cache image placeholders.
+    """
+    try:
+        doc_temp = fitz.open(stream=pdf_bytes, filetype="pdf")
+        total_pages = doc_temp.page_count
+        doc_temp.close()
+    except Exception as e:
+        logger.error(f"[parser] Không thể mở file PDF: {e}")
+        return ""
+
+    if total_pages == 0:
+        return ""
+
+    max_pages = min(total_pages, getattr(config, 'PDF_OCR_MAX_PAGES', 50))
+    full_text_parts = [""] * max_pages
+    max_workers = min(10, max_pages)
+
+    logger.info(f"[parser] Bắt đầu parse {max_pages} trang PDF với {max_workers} luồng...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_page = {
+            executor.submit(_process_pdf_page, pdf_bytes, page_idx): page_idx
+            for page_idx in range(max_pages)
+        }
+        for future in concurrent.futures.as_completed(future_to_page):
+            try:
+                page_idx, text = future.result()
+                full_text_parts[page_idx] = text
+                logger.info(f"[parser] Đã hoàn thành render nội dung trang {page_idx + 1}/{max_pages}.")
+            except Exception as exc:
+                logger.error(f"[parser] Trang sinh ra lỗi: {exc}")
 
     final_text = "".join(full_text_parts).strip()
-    
-    # Gọi hàm Hậu xử lý Regex làm sạch tag trước khi trả về
     return _clean_parsed_text(final_text)
 
 

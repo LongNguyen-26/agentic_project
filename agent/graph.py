@@ -159,6 +159,7 @@ def process_task_node(state: OuterState) -> dict:
         "tool_observations": [],
         "confidence_score": 0.0,
         "verification_feedback": "",
+        "answer_log": "",
         "used_tools": [],
         "attempts": 0,
         "is_verified": False,

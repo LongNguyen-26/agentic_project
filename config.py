@@ -61,6 +61,7 @@ class Settings:
 	CLASSIFICATION_MAX_TOKENS: int = int(os.getenv("CLASSIFICATION_MAX_TOKENS", "64"))
 	LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))
 	VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("VERIFICATION_MAX_OUTPUT_TOKENS", "1200"))
+
 	# Sort tasks usually carry many file summaries; keep a high configurable budget.
 	SORT_ACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_ACTION_MAX_OUTPUT_TOKENS", "36000"))
 	SORT_VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_VERIFICATION_MAX_OUTPUT_TOKENS", "36000"))
@@ -92,6 +93,11 @@ class Settings:
 	MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
 	# Minimum confidence to pass verification without another retry.
 	VERIFIER_MIN_CONFIDENCE: float = float(os.getenv("VERIFIER_MIN_CONFIDENCE", "0.60"))
+
+	# Lightweight QA grounding gates to reduce hallucination risk.
+	QA_GROUNDING_ENFORCED: bool = os.getenv("QA_GROUNDING_ENFORCED", "true").strip().lower() in {"1", "true", "yes", "on"}
+	QA_GROUNDING_MIN_EVIDENCE_MARKERS: int = int(os.getenv("QA_GROUNDING_MIN_EVIDENCE_MARKERS", "1"))
+	QA_ANSWER_LOG_MAX_CHARS: int = int(os.getenv("QA_ANSWER_LOG_MAX_CHARS", "12000"))
 
 
 config = Settings()

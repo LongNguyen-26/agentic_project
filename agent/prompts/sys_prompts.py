@@ -33,6 +33,8 @@ Mandatory rules:
    return needs_image_analysis=true with exact target_image_ids and a clear vision_prompt.
 4. If available evidence is sufficient, return needs_image_analysis=false with answer, confidence, and reasoning.
 5. Do not invent image IDs; only use IDs that appear in placeholders.
+6. Evidence-first: in reasoning, cite concrete anchors from context when possible (file path, page indicator, image ID, quote).
+7. If evidence is missing or ambiguous, explicitly say what is missing and lower confidence instead of guessing.
 """
 
 SYS_ACTION_SORT = f"""You are an expert VPP competition agent for folder-organisation tasks.
@@ -49,7 +51,13 @@ Mandatory rules:
 
 SYS_VERIFY_QA = """You are a strict QA verifier.
 Compare draft answers against the original context, fix unsupported claims, and return VerificationResponse JSON.
-Set changed=true only when the draft is modified."""
+Set changed=true only when the draft is modified.
+
+Verification policy:
+1. Reject unsupported claims and remove speculative wording.
+2. Ensure thought_log is grounded by explicit evidence anchors where possible.
+3. If draft lacks grounding anchors, provide correction guidance in thought_log.
+"""
 
 
 SYS_VERIFY_SORT = f"""You are a strict folder-organisation verifier.

@@ -9,7 +9,14 @@ def build_qa_action_prompt(
     feedback: str = "",
     planning_hints: str = "",
 ) -> str:
-    prompt = f"Task Type: question-answering\n\n<task_instruction>\n{prompt_template}\n</task_instruction>\n\n"
+    prompt = (
+        f"Task Type: question-answering\n\n<task_instruction>\n{prompt_template}\n</task_instruction>\n\n"
+        "<qa_output_policy>\n"
+        "- Answer only from provided context; do not infer missing facts.\n"
+        "- If evidence is ambiguous or missing, state uncertainty explicitly and reduce confidence.\n"
+        "- In thought_log, include concrete evidence anchors when available: file path, page, image ID, or exact phrase.\n"
+        "</qa_output_policy>\n\n"
+    )
     if planning_hints:
         prompt += f"<planning_hints>\n{planning_hints}\n</planning_hints>\n\n"
     prompt += f"<context>\n{context}\n</context>\n\n"
@@ -60,7 +67,8 @@ def build_qa_verification_prompt(prompt_template: str, draft_answer: Dict[str, A
         f"<task_instruction>\n{prompt_template}\n</task_instruction>\n\n"
         f"<source_context>\n{context}\n</source_context>\n\n"
         f"<draft_answer_json>\n{draft_answer}\n</draft_answer_json>\n\n"
-        "Verify faithfulness and schema correctness."
+        "Verify faithfulness and schema correctness.\n"
+        "Reject unsupported claims, add uncertainty when evidence is weak, and ensure thought_log cites concrete anchors where possible."
     )
 
 

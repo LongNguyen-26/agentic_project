@@ -54,6 +54,9 @@ IMAGE_ID_PATTERN = re.compile(
     r"\[IMAGE_PLACEHOLDER\s*\|\s*ID:\s*([A-Za-z0-9_-]+)\s*\|",
     re.IGNORECASE,
 )
+FILE_PATH_MARKER_PATTERN = re.compile(r"Public/[^\s\]\)\'\"]+", re.IGNORECASE)
+PAGE_MARKER_PATTERN = re.compile(r"(?:page\s*\d+|ページ\s*\d+)", re.IGNORECASE)
+IMAGE_ID_LITERAL_PATTERN = re.compile(r"\b[0-9a-f]{16}\b", re.IGNORECASE)
 
 FORCED_VISION_KEYWORDS = (
     "anh",
@@ -135,22 +138,37 @@ def _collect_candidate_image_ids(state: InnerState) -> List[str]:
     return ordered_ids
 
 
-def _resolve_sort_action_max_tokens(state: InnerState) -> int:
-    file_count = len(state.get("parsed_documents", []))
-    adaptive_floor = 4000 + max(file_count, 1) * 600
-    return min(
-        max(config.LLM_MAX_OUTPUT_TOKENS, adaptive_floor),
-        config.SORT_ACTION_MAX_OUTPUT_TOKENS,
-    )
+def _collect_output_markers(output_text: str) -> Set[str]:
+    markers: Set[str] = set()
+    if not output_text:
+        return markers
+
+    markers.update(FILE_PATH_MARKER_PATTERN.findall(output_text))
+    markers.update(PAGE_MARKER_PATTERN.findall(output_text))
+    markers.update(IMAGE_ID_LITERAL_PATTERN.findall(output_text))
+    return {marker.strip() for marker in markers if marker.strip()}
 
 
-def _resolve_sort_verification_max_tokens(state: InnerState) -> int:
-    file_count = len(state.get("parsed_documents", []))
-    adaptive_floor = 3000 + max(file_count, 1) * 450
-    return min(
-        max(config.VERIFICATION_MAX_OUTPUT_TOKENS, adaptive_floor),
-        config.SORT_VERIFICATION_MAX_OUTPUT_TOKENS,
-    )
+def _count_grounded_markers(output_text: str, context_text: str) -> tuple[int, int]:
+    markers = _collect_output_markers(output_text)
+    if not markers:
+        return 0, 0
+    grounded = sum(1 for marker in markers if marker in (context_text or ""))
+    return grounded, len(markers)
+
+
+def _append_answer_log(state: InnerState, answers: List[str], confidence: float, grounded: int, detected: int) -> str:
+    attempt = int(state.get("attempts", 0)) + 1
+    preview_answers = [ans.strip()[:600] for ans in answers if ans and ans.strip()]
+    lines = [f"[attempt {attempt}] confidence={confidence:.3f} grounding={grounded}/{detected}"]
+    for ans in preview_answers:
+        lines.append(f"- {ans}")
+
+    entry = "\n".join(lines)
+    previous = (state.get("answer_log") or "").strip()
+    merged = f"{previous}\n\n{entry}" if previous else entry
+    max_chars = max(int(config.QA_ANSWER_LOG_MAX_CHARS), 1000)
+    return merged[-max_chars:]
 
 
 def _get_llm_service() -> LLMService:
@@ -179,7 +197,6 @@ def _generate_sort_action(state: InnerState, feedback: str) -> dict:
         system_prompt=SYS_ACTION_SORT,
         user_prompt=prompt,
         response_model=SortActionResponse,
-        max_completion_tokens=_resolve_sort_action_max_tokens(state),
     )
 
     formatted_thought_log = (draft_response.overall_thought_log or "").strip()
@@ -302,7 +319,6 @@ def _verify_sort(state: InnerState) -> dict:
         system_prompt=SYS_VERIFY_SORT,
         user_prompt=prompt,
         response_model=VerificationResponse,
-        max_completion_tokens=_resolve_sort_verification_max_tokens(state),
     )
 
     confidence = float(verification.confidence)
@@ -404,7 +420,6 @@ def _verify_qa(state: InnerState) -> dict:
         system_prompt=SYS_VERIFY_QA,
         user_prompt=prompt,
         response_model=VerificationResponse,
-        max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,
     )
 
     changed = verification.changed
@@ -418,11 +433,37 @@ def _verify_qa(state: InnerState) -> dict:
             "confidence": confidence,
         }
 
+    output_text = "\n".join(next_answer.get("answers", [])) + "\n" + next_answer.get("thought_log", "")
+    grounded_count, detected_count = _count_grounded_markers(output_text, context)
+    grounding_pass = True
+    grounding_feedback = ""
+    if bool(config.QA_GROUNDING_ENFORCED):
+        required = max(int(config.QA_GROUNDING_MIN_EVIDENCE_MARKERS), 0)
+        if detected_count == 0 or grounded_count < required:
+            grounding_pass = False
+            grounding_feedback = (
+                f"Grounding thiếu bằng chứng: grounded={grounded_count}, detected={detected_count}, "
+                f"required={required}. Hãy trích dẫn rõ file path/page/image id từ context."
+            )
+
+    answer_log = _append_answer_log(
+        state,
+        next_answer.get("answers", []),
+        confidence,
+        grounded_count,
+        detected_count,
+    )
+
+    combined_feedback = (verification.thought_log or "").strip()
+    if grounding_feedback:
+        combined_feedback = f"{combined_feedback}\n\n[Grounding]: {grounding_feedback}".strip()
+
     return {
         "draft_answer": next_answer,
         "confidence_score": confidence,
-        "is_verified": confidence >= config.VERIFIER_MIN_CONFIDENCE,
-        "verification_feedback": verification.thought_log,
+        "is_verified": confidence >= config.VERIFIER_MIN_CONFIDENCE and grounding_pass,
+        "verification_feedback": combined_feedback,
+        "answer_log": answer_log,
         "attempts": state["attempts"] + 1,
     }
 

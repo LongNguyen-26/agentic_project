@@ -265,7 +265,12 @@ class LLMService:
             raise last_exc
         raise RuntimeError("LLM call failed without exception details")
 
-    def classify_task_type(self, *, system_prompt: str, user_prompt: str) -> str:
+    def classify_task_type(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
         """Classify task type using caller-provided prompts."""
         try:
             response = self._chat_with_retries(
@@ -282,7 +287,12 @@ class LLMService:
             logger.warning("[llm] Task classification failed; defaulting to question-answering", exc_info=True)
             return "question-answering"
 
-    def extract_planning_hints(self, *, system_prompt: str, user_prompt: str) -> str:
+    def extract_planning_hints(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
         """Extract concise planning hints using caller-provided prompts."""
         try:
             response = self._chat_with_retries(
