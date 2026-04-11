@@ -42,9 +42,15 @@ class LLMService:
         attempts = max(config.LLM_MAX_RETRIES, 1)
         base_delay = max(config.LLM_RETRY_BASE_DELAY, 0.1)
         jitter = max(config.LLM_RETRY_JITTER, 0.0)
+        retry_token_growth = max(config.LLM_RETRY_TOKEN_GROWTH_FACTOR, 1.0)
         last_exc: Optional[Exception] = None
         current_max_tokens = max(int(max_completion_tokens), 64)
         current_messages = deepcopy(messages)
+
+        def _next_retry_tokens(current_tokens: int) -> int:
+            retry_cap = max(int(config.LLM_RETRY_MAX_OUTPUT_TOKENS), current_tokens)
+            proposed = int(max(current_tokens + 256, current_tokens * retry_token_growth))
+            return min(proposed, retry_cap)
 
         def _is_context_overflow_error(err_text: str) -> bool:
             lowered = err_text.lower()
@@ -174,7 +180,16 @@ class LLMService:
                     time.sleep(sleep_for)
                     continue
                 if token_limit_hit and attempt < attempts:
-                    current_max_tokens = min(current_max_tokens * 2, 8192)
+                    next_max_tokens = _next_retry_tokens(current_max_tokens)
+                    if next_max_tokens <= current_max_tokens:
+                        logger.warning(
+                            "[llm] Instructor token truncation hit retry ceiling on model=%s; max_completion_tokens=%s",
+                            self.reasoning_model,
+                            current_max_tokens,
+                        )
+                        last_exc = exc
+                        break
+                    current_max_tokens = next_max_tokens
                     logger.warning(
                         "[llm] Instructor token truncation on model=%s; retrying with max_completion_tokens=%s attempt=%s/%s",
                         self.reasoning_model,
@@ -210,7 +225,16 @@ class LLMService:
                     continue
 
                 if token_limit_hit and attempt < attempts:
-                    current_max_tokens = min(current_max_tokens * 2, 8192)
+                    next_max_tokens = _next_retry_tokens(current_max_tokens)
+                    if next_max_tokens <= current_max_tokens:
+                        logger.warning(
+                            "[llm] Token limit hit retry ceiling on model=%s; max_completion_tokens=%s",
+                            self.reasoning_model,
+                            current_max_tokens,
+                        )
+                        last_exc = exc
+                        break
+                    current_max_tokens = next_max_tokens
                     logger.warning(
                         "[llm] Token limit hit on model=%s; retrying with max_completion_tokens=%s attempt=%s/%s",
                         self.reasoning_model,

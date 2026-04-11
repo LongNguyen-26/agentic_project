@@ -1,6 +1,7 @@
 # agent/nodes/inner_loop.py
 import re
 from typing import Dict, List, Set
+from collections import Counter
 
 from agent.prompts.sys_prompts import (
     SYS_ACTION_QA,
@@ -48,6 +49,29 @@ def _parse_valid_folders(raw_text: str) -> Set[str]:
 
 VALID_FOLDERS: Set[str] = _parse_valid_folders(VALID_FOLDERS_STR)
 FOLDER_LINE_PATTERN = re.compile(r"^\s*Folder:\s*(.+?)\s*$", re.IGNORECASE)
+SORT_FILE_LINE_PATTERN = re.compile(r"^\s*-\s*File:\s*(.+?)\s*$", re.IGNORECASE)
+IMAGE_ID_PATTERN = re.compile(
+    r"\[IMAGE_PLACEHOLDER\s*\|\s*ID:\s*([A-Za-z0-9_-]+)\s*\|",
+    re.IGNORECASE,
+)
+
+FORCED_VISION_KEYWORDS = (
+    "anh",
+    "ảnh",
+    "hinh",
+    "hình",
+    "image",
+    "images",
+    "photo",
+    "photos",
+    "picture",
+    "visual",
+    "図面",
+    "写真",
+    "画像",
+    "配線図",
+)
+FORCED_VISION_MAX_IMAGES = 8
 
 
 def _extract_selected_folders_from_thought_log(thought_log: str) -> List[str]:
@@ -57,6 +81,76 @@ def _extract_selected_folders_from_thought_log(thought_log: str) -> List[str]:
         if match:
             selected.append(match.group(1).strip())
     return selected
+
+
+def _extract_sort_entries_from_thought_log(thought_log: str) -> List[Dict[str, str]]:
+    entries: List[Dict[str, str]] = []
+    current_file = ""
+
+    for line in thought_log.splitlines():
+        file_match = SORT_FILE_LINE_PATTERN.match(line)
+        if file_match:
+            current_file = file_match.group(1).strip()
+            continue
+
+        folder_match = FOLDER_LINE_PATTERN.match(line)
+        if folder_match and current_file:
+            entries.append(
+                {
+                    "file_path": current_file,
+                    "selected_folder": folder_match.group(1).strip(),
+                }
+            )
+            current_file = ""
+
+    return entries
+
+
+def _should_force_vision(prompt_template: str) -> bool:
+    prompt_lower = (prompt_template or "").lower()
+    return any(keyword in prompt_lower for keyword in FORCED_VISION_KEYWORDS)
+
+
+def _extract_image_ids_from_text(raw_text: str) -> List[str]:
+    if not raw_text:
+        return []
+    return [match.group(1).strip() for match in IMAGE_ID_PATTERN.finditer(raw_text)]
+
+
+def _collect_candidate_image_ids(state: InnerState) -> List[str]:
+    ordered_ids: List[str] = []
+    seen: Set[str] = set()
+
+    # Prefer image placeholders that survived retrieval, then fall back to full parsed docs.
+    text_sources: List[str] = [state.get("retrieved_context", "")]
+    for document in state.get("parsed_documents", []):
+        text_sources.append(document.get("text", ""))
+
+    for raw_text in text_sources:
+        for image_id in _extract_image_ids_from_text(raw_text):
+            if image_id and image_id not in seen:
+                seen.add(image_id)
+                ordered_ids.append(image_id)
+
+    return ordered_ids
+
+
+def _resolve_sort_action_max_tokens(state: InnerState) -> int:
+    file_count = len(state.get("parsed_documents", []))
+    adaptive_floor = 4000 + max(file_count, 1) * 600
+    return min(
+        max(config.LLM_MAX_OUTPUT_TOKENS, adaptive_floor),
+        config.SORT_ACTION_MAX_OUTPUT_TOKENS,
+    )
+
+
+def _resolve_sort_verification_max_tokens(state: InnerState) -> int:
+    file_count = len(state.get("parsed_documents", []))
+    adaptive_floor = 3000 + max(file_count, 1) * 450
+    return min(
+        max(config.VERIFICATION_MAX_OUTPUT_TOKENS, adaptive_floor),
+        config.SORT_VERIFICATION_MAX_OUTPUT_TOKENS,
+    )
 
 
 def _get_llm_service() -> LLMService:
@@ -85,7 +179,7 @@ def _generate_sort_action(state: InnerState, feedback: str) -> dict:
         system_prompt=SYS_ACTION_SORT,
         user_prompt=prompt,
         response_model=SortActionResponse,
-        max_completion_tokens=36000,
+        max_completion_tokens=_resolve_sort_action_max_tokens(state),
     )
 
     formatted_thought_log = (draft_response.overall_thought_log or "").strip()
@@ -122,6 +216,34 @@ def _generate_qa_action(state: InnerState, feedback: str) -> dict:
             f"{context}\n\n"
             "[Vision Tool Observations]\n"
             f"{prior_observations}"
+        )
+
+    # Force at least one vision pass for image-heavy prompts before finalizing QA answer.
+    if (
+        _should_force_vision(state.get("prompt_template", ""))
+        and not state.get("tool_observations")
+    ):
+        candidate_image_ids = _collect_candidate_image_ids(state)
+        target_ids = candidate_image_ids[:FORCED_VISION_MAX_IMAGES]
+        if target_ids:
+            logger.info(
+                "[Action] Forcing vision route task_id=%s image_count=%s",
+                state.get("task_id"),
+                len(target_ids),
+            )
+            forced_prompt = (
+                "Analyze the selected image(s) to answer this task. "
+                "Extract only visual evidence relevant to the prompt and quote visible labels/text when possible.\n\n"
+                f"Task:\n{state.get('prompt_template', '')}"
+            )
+            return {
+                "tool_calls": target_ids,
+                "vision_prompt": forced_prompt,
+                "confidence_score": max(float(state.get("confidence_score", 0.0) or 0.0), 0.5),
+            }
+        logger.info(
+            "[Action] Prompt matched forced-vision keywords but no IMAGE_PLACEHOLDER IDs found task_id=%s",
+            state.get("task_id"),
         )
 
     prompt = build_qa_action_prompt(
@@ -165,6 +287,12 @@ def _generate_qa_action(state: InnerState, feedback: str) -> dict:
 def _verify_sort(state: InnerState) -> dict:
     draft = state["draft_answer"]
     file_summaries = {doc["file_path"]: doc.get("summary", "") for doc in state.get("parsed_documents", [])}
+    expected_files = [
+        str(doc.get("file_path", "")).strip()
+        for doc in state.get("parsed_documents", [])
+        if str(doc.get("file_path", "")).strip()
+    ]
+    expected_file_set = set(expected_files)
     prompt = build_sort_verification_prompt(
         prompt_template=state.get("prompt_template", ""),
         draft_answer=draft,
@@ -174,8 +302,7 @@ def _verify_sort(state: InnerState) -> dict:
         system_prompt=SYS_VERIFY_SORT,
         user_prompt=prompt,
         response_model=VerificationResponse,
-        # max_completion_tokens=config.VERIFICATION_MAX_OUTPUT_TOKENS,
-        max_completion_tokens=36000,
+        max_completion_tokens=_resolve_sort_verification_max_tokens(state),
     )
 
     confidence = float(verification.confidence)
@@ -195,8 +322,17 @@ def _verify_sort(state: InnerState) -> dict:
         "confidence": confidence,
     }
 
-    selected_folders = _extract_selected_folders_from_thought_log(next_answer["thought_log"])
+    # Validate file-folder decisions from draft sorting details only; verifier notes are free text.
+    sort_entries = _extract_sort_entries_from_thought_log(draft.get("thought_log", ""))
+    selected_files = [entry["file_path"] for entry in sort_entries]
+    selected_folders = [entry["selected_folder"] for entry in sort_entries]
     invalid_folders = sorted({folder for folder in selected_folders if folder not in VALID_FOLDERS})
+    selected_file_set = set(selected_files)
+
+    file_counter = Counter(selected_files)
+    duplicated_files = sorted({file_path for file_path, count in file_counter.items() if count > 1})
+    missing_files = sorted(expected_file_set - selected_file_set)
+    unexpected_files = sorted(selected_file_set - expected_file_set)
 
     if invalid_folders:
         feedback = (
@@ -205,15 +341,37 @@ def _verify_sort(state: InnerState) -> dict:
             "Use only folders listed in VALID_FOLDERS_STR."
         )
         is_valid = False
+    elif duplicated_files:
+        feedback = (
+            "Duplicate file decision(s) detected: "
+            f"{', '.join(duplicated_files)}. "
+            "Each resource must be assigned exactly one folder."
+        )
+        is_valid = False
+    elif missing_files:
+        feedback = (
+            "Missing folder decision(s) for file(s): "
+            f"{', '.join(missing_files)}. "
+            "Provide one folder decision for every resource."
+        )
+        is_valid = False
+    elif unexpected_files:
+        feedback = (
+            "Unexpected file decision(s) detected: "
+            f"{', '.join(unexpected_files)}. "
+            "Only files present in task resources are allowed."
+        )
+        is_valid = False
     else:
         is_valid = (
-            bool(selected_folders)
+            len(sort_entries) == len(expected_files)
+            and bool(selected_folders)
             and confidence >= config.VERIFIER_MIN_CONFIDENCE
         )
         feedback = ""
         if not is_valid:
             feedback = (
-                f"Folder verification failed: selected_folders={len(selected_folders)}, "
+                f"Folder verification failed: decisions={len(sort_entries)}/{len(expected_files)}, "
                 f"confidence={confidence:.3f}, required_confidence={config.VERIFIER_MIN_CONFIDENCE:.3f}."
             )
 
@@ -441,10 +599,15 @@ def vision_tool_node(state: InnerState) -> dict:
     existing_observations = list(state.get("tool_observations", []))
     existing_observations.append(observation)
 
+    used_tools = list(state.get("used_tools", []))
+    if "vision_tool" not in used_tools:
+        used_tools.append("vision_tool")
+
     return {
         "tool_observations": existing_observations,
         "tool_calls": [],
         "vision_prompt": "",
+        "used_tools": used_tools,
     }
 
 def verifiability_node(state: InnerState) -> dict:

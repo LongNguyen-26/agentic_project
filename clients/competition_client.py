@@ -60,7 +60,17 @@ class APIClient:
 
             if response.status_code == 401 and retry_on_unauthorized and self.session_id:
                 logger.warning("[api] 401 received at %s; refreshing session", endpoint)
-                self.create_session(self.session_id)
+                try:
+                    self.create_session(self.session_id)
+                except httpx.HTTPStatusError as refresh_error:
+                    refresh_response = refresh_error.response
+                    if refresh_response is not None and refresh_response.status_code == 409:
+                        logger.info(
+                            "[api] Session refresh returned 409 (session finished) at endpoint=%s",
+                            endpoint,
+                        )
+                        return refresh_response
+                    raise
                 if headers is not None and "Authorization" in headers and self.access_token:
                     headers["Authorization"] = f"Bearer {self.access_token}"
                 if attempt >= attempts:
@@ -140,6 +150,9 @@ class APIClient:
         if response.status_code == 404:
             logger.info("[task] No more tasks available (404)")
             return None  # No more tasks
+        if response.status_code == 409:
+            logger.info("[task] Session finished (409); stopping fetch loop")
+            return None
         response.raise_for_status()
         task = TaskResponse(**response.json())
         logger.info("[task] Fetched task_id=%s type=%s resources=%s", task.task_id, task.type, len(task.resources))

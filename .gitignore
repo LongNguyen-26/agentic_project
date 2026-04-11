@@ -44,3 +44,5 @@ pip uninstall rapidocr-onnxruntime
 ket_qua*
 md.ipynb
 /ocr_models
+collect_tasks.py
+session_checkpoint.json

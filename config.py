@@ -61,6 +61,12 @@ class Settings:
 	CLASSIFICATION_MAX_TOKENS: int = int(os.getenv("CLASSIFICATION_MAX_TOKENS", "64"))
 	LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))
 	VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("VERIFICATION_MAX_OUTPUT_TOKENS", "1200"))
+	# Sort tasks usually carry many file summaries; keep a high configurable budget.
+	SORT_ACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_ACTION_MAX_OUTPUT_TOKENS", "36000"))
+	SORT_VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_VERIFICATION_MAX_OUTPUT_TOKENS", "36000"))
+	# Retry policy for token-limit events.
+	LLM_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_RETRY_MAX_OUTPUT_TOKENS", "36000"))
+	LLM_RETRY_TOKEN_GROWTH_FACTOR: float = float(os.getenv("LLM_RETRY_TOKEN_GROWTH_FACTOR", "2.0"))
 	
 	PARSER_MIN_TEXT_CHARS: int = int(os.getenv("PARSER_MIN_TEXT_CHARS", "100"))
 	PDF_OCR_MAX_PAGES: int = int(os.getenv("PDF_OCR_MAX_PAGES", "30"))
