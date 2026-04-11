@@ -79,6 +79,11 @@ class Settings:
 	RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
 	RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
 	RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))
+	RAG_RERANK_ENABLED: bool = os.getenv("RAG_RERANK_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+	RAG_RERANK_MODEL: str = os.getenv("RAG_RERANK_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+	RAG_RERANK_DEVICE: str = os.getenv("RAG_RERANK_DEVICE", "cpu")
+	RAG_RERANK_PRE_TOP_K: int = int(os.getenv("RAG_RERANK_PRE_TOP_K", "20"))
+	RAG_RERANK_BATCH_SIZE: int = int(os.getenv("RAG_RERANK_BATCH_SIZE", "16"))
 
 	EVIDENCE_MAX_ITEMS: int = int(os.getenv("EVIDENCE_MAX_ITEMS", "5"))
 	EVIDENCE_MAX_CHARS_PER_ITEM: int = int(os.getenv("EVIDENCE_MAX_CHARS_PER_ITEM", "1200"))
