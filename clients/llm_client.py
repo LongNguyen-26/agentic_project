@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional, Type
 
 from instructor.core.exceptions import IncompleteOutputException, InstructorRetryException
+from langfuse import propagate_attributes
 from langfuse.openai import OpenAI
 from openai import APIError, APITimeoutError, BadRequestError, RateLimitError
 from pydantic import BaseModel, ValidationError
@@ -143,13 +144,18 @@ class LLMService:
                 elif reasoning_effort:
                     request_kwargs["reasoning_effort"] = reasoning_effort
 
+                trace_attrs: Dict[str, Any] = {}
                 if session_id:
-                    request_kwargs["session_id"] = session_id
+                    trace_attrs["session_id"] = str(session_id)
                 if task_id:
-                    request_kwargs["tags"] = [f"task:{task_id}"]
-                    request_kwargs["metadata"] = {"task_id": task_id}
+                    trace_attrs["tags"] = [f"task:{task_id}"]
+                    trace_attrs["metadata"] = {"taskId": str(task_id)}
 
-                response = self.client.chat.completions.create(**request_kwargs)
+                if trace_attrs:
+                    with propagate_attributes(**trace_attrs):
+                        response = self.client.chat.completions.create(**request_kwargs)
+                else:
+                    response = self.client.chat.completions.create(**request_kwargs)
                 try:
                     response_dump = response.model_dump(mode="json")
                     logger.debug(
