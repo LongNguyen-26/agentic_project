@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
 # Install tools needed to fetch and install uv.
 RUN apt-get update \
@@ -15,14 +15,23 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 
 # Copy the project source.
-COPY . .
+COPY src ./src
 
 # Install dependencies from lockfile exactly.
-RUN uv sync --frozen --no-dev
+# no-editable avoids editable metadata overhead in runtime image.
+RUN uv sync --frozen --no-dev --no-editable
+
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy only runtime environment and package source from builder.
+COPY --from=builder /app/.venv /app/.venv
+COPY src ./src
 
 # Use the uv-managed virtual environment when running python.
 ENV PATH="/app/.venv/bin:${PATH}"
-ENV PYTHONPATH="/app/src"
 
 # Judge usage examples:
 #   docker build -t dut-trust-agent .

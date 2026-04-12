@@ -1,115 +1,154 @@
 # CONTRIBUTING
 
-## 👋 Purpose
-This guide is for developers receiving or extending the project.
+## 1. Purpose
+This document explains how to develop, test, and extend the current agent safely.
 
-Goal: keep the agent stable for competition runtime while allowing safe extension.
+Goals:
+- keep competition runtime stable
+- preserve typed contracts and graph behavior
+- keep docs/config/tests synchronized with code changes
 
-## ✅ Development Setup
-1. Create environment and install dependencies.
-2. Copy `.env.example` to `.env`.
-3. Fill required keys: `COMPETITION_BASE_URL`, `API_KEY`, `OPENAI_API_KEY`.
-4. Run `python main.py` and verify auth/fetch logs.
+## 2. Local Development Setup
 
-## 🧪 Testing
-Run all unit tests:
+### 2.1 Prerequisites
+- Python 3.12+
+- uv installed (recommended)
+
+### 2.2 Install
+From repository root:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+uv sync --frozen --extra dev
+```
+
+### 2.3 Environment configuration
+Create `.env` from `.env.example` and set at minimum:
+- `COMPETITION_BASE_URL`
+- `API_KEY`
+- `OPENAI_API_KEY`
+
+### 2.4 Quick runtime sanity check
+
+```bash
+uv run python -m devday_agent.main
+```
+
+Expected early log sequence includes auth/fetch lifecycle lines.
+
+## 3. Test Workflow
+
+Run all tests:
+
+```bash
+uv run pytest src/tests -q
 ```
 
 Run focused suites:
 
 ```bash
-python -m unittest tests.test_outer_loop
-python -m unittest tests.test_inner_loop_verifiability
-python -m unittest tests.test_document_parser
-python -m unittest tests.test_llm_client_overflow
-python -m unittest tests.test_planning_hints
-python -m unittest tests.test_context_manager
+uv run pytest src/tests/test_outer_loop.py -q
+uv run pytest src/tests/test_inner_loop_verifiability.py -q
+uv run pytest src/tests/test_document_parser.py -q
+uv run pytest src/tests/test_llm_client_overflow.py -q
+uv run pytest src/tests/test_planning_hints.py -q
+uv run pytest src/tests/test_context_manager.py -q
+uv run pytest src/tests/test_rag_engine.py -q
 ```
 
-## 🧩 Extending the Agent for New Task Types
-If the organizer introduces a new task type (beyond `folder-organisation` and `question-answering`), update in this order:
+Rule: code changes in nodes/clients/tools should include or update tests in `src/tests`.
 
-1. Schema and type contract
-- `models/llm_schemas.py`
-- Extend `TaskClassification.task_type` literal.
-- Add/adjust structured response model for the new task.
+## 4. Codebase Conventions
 
-2. Classification prompts and prompt builders
-- `agent/prompts/sys_prompts.py`
-- Update `SYS_CLASSIFY_TASK` with explicit definition for the new type.
-- Add new system prompts for action and verification if needed.
-- `agent/prompts/user_prompt.py`
-- Add `build_<new_type>_action_prompt(...)` and `build_<new_type>_verification_prompt(...)`.
+- Source package path: `src/devday_agent`.
+- Prefer absolute imports from `devday_agent.*`.
+- Keep docstrings/comments/log messages in English.
+- Maintain explicit return type hints for node/helper functions.
+- Keep state/schema typing strict and aligned with pydantic models.
+- Avoid introducing unused helper paths and dead fallback code.
 
-3. Outer loop routing/classification
-- `agent/nodes/outer_loop.py`
-- Extend rule-based keyword fast-path in `fetch_task_node`.
-- Keep LLM fallback classification as final fallback.
+## 5. Extending for New Task Types
 
-4. Inner loop execution logic
-- `agent/nodes/inner_loop.py`
-- Add `_generate_<new_type>_action(...)`.
-- Add `_verify_<new_type>(...)`.
-- Dispatch in `action_generation_node` and `verifiability_node`.
+When adding a new task type beyond `question-answering` and `folder-organisation`, update in this order.
 
-5. Graph routing if the new type needs a different processing path
-- `agent/graph.py`
-- `agent/nodes/router.py`
-- Add conditional branch/node(s) only if current flow is insufficient.
+1. Schema contracts
+- `src/devday_agent/models/llm_schemas.py`
+- extend `TaskClassification.task_type`
+- add typed action/verification response models
+
+2. Prompt layer
+- `src/devday_agent/agent/prompts/sys_prompts.py`
+- `src/devday_agent/agent/prompts/user_prompt.py`
+- add `build_<task>_action_prompt(...)` and `build_<task>_verification_prompt(...)`
+
+3. Outer-loop classification and planning
+- `src/devday_agent/agent/nodes/outer_loop.py`
+- extend rule-based fast path in `fetch_task_node`
+- keep LLM classification fallback for ambiguous prompts
+
+4. Inner-loop action + verification
+- `src/devday_agent/agent/nodes/inner_loop.py`
+- add `_generate_<task>_action(...)` and `_verify_<task>(...)`
+- wire dispatch in action and verification nodes
+
+5. Routing/graph changes (only if needed)
+- `src/devday_agent/agent/nodes/router.py`
+- `src/devday_agent/agent/graph.py`
+- add new branch only when current flow cannot represent task requirements
 
 6. Tests
-- Add new unit tests under `tests/` for:
-  - task classification behavior
-  - action generation schema compliance
-  - verification pass/retry behavior
-  - submit payload shape
+- add task coverage in `src/tests` for:
+  - classification
+  - action schema
+  - verification retry/pass
+  - submission payload shape
 
-## 🛠️ Troubleshooting
+## 6. Operational Troubleshooting
 
-### 1) LLM Context Overflow
+### 6.1 LLM context overflow
 Symptoms:
-- Errors like `maximum context length`, `context_length_exceeded`, `prompt is too long`.
+- `maximum context length`
+- `context_length_exceeded`
+- `prompt is too long`
 
-What the code already does:
-- `clients/llm_client.py` trims old messages while preserving system + latest user context.
-- Retries with exponential backoff and jitter.
+Current safeguards:
+- message trimming while preserving system + latest user context
+- retry with backoff/jitter
 
-What to check:
-1. Reduce oversized prompts or context volume upstream.
-2. Confirm `LLM_MAX_RETRIES`, `LLM_MAX_OUTPUT_TOKENS`, `VERIFICATION_MAX_OUTPUT_TOKENS` in `.env`.
-3. Re-run `python -m unittest tests.test_llm_client_overflow`.
+Checks:
+1. reduce oversized prompt/context blocks
+2. tune token budgets in `.env`
+3. run `uv run pytest src/tests/test_llm_client_overflow.py -q`
 
-### 2) OpenAI Vision OCR Failure
+### 6.2 Vision OCR/tool issues
 Symptoms:
-- Parser warning that image OCR failed or returned empty content.
+- image OCR failures or empty vision observations
 
-What the code already does:
-- In `tools/document_parser.py`, image resources are normalized and sent directly to OpenAI vision OCR.
-- Parser keeps running even if OCR fails for a single image.
+Checks:
+1. verify `OPENAI_API_KEY`
+2. verify `MODEL_NAME` supports image input
+3. inspect `storage/agent.log` for parser/vision warnings
 
-What to check:
-1. Verify `OPENAI_API_KEY` in `.env`.
-2. Confirm model configuration (`MODEL_NAME`) supports image input.
-3. Check network access and API quota/rate limits.
-
-### 3) Token Expiry or API Rate Limit
+### 6.3 API auth/rate-limit instability
 Symptoms:
-- HTTP `401` (unauthorized) or `429` (rate limit).
+- frequent 401/429/5xx responses
 
-What the code already does:
-- `clients/competition_client.py` retries with backoff for retryable statuses.
-- On `401`, client refreshes session and retries request.
-- Session checkpoint is persisted under `storage/session_checkpoint.json`.
+Checks:
+1. validate `COMPETITION_BASE_URL` and `API_KEY`
+2. tune `HTTP_MAX_RETRIES`, `HTTP_BACKOFF_SECONDS`, `HTTP_TIMEOUT_SECONDS`
+3. check checkpoint behavior in `storage/session_checkpoint.json`
 
-What to check:
-1. Confirm `COMPETITION_BASE_URL` and `API_KEY` are valid.
-2. Tune `HTTP_MAX_RETRIES`, `HTTP_BACKOFF_SECONDS`, `HTTP_TIMEOUT_SECONDS` for unstable networks.
-3. Check `storage/agent.log` for endpoint-level retries and auth refresh events.
+## 7. Documentation Update Policy
 
-## 🔒 Security Notes
-- Never commit real API keys or tokens.
+When behavior/config/commands change, update all impacted docs in the same change set:
+- `README.md`
+- `ARCHITECTURE.md`
+- `CONTRIBUTING.md`
+- `.env.example` (if env keys/defaults change)
+
+Do not leave docs in a partially migrated state.
+
+## 8. Security and Secrets
+
+- Never commit real keys/tokens.
 - Keep `.env` local only.
-- Keep logs and storage artifacts sanitized before sharing.
+- Sanitize logs/checkpoints before sharing artifacts.
