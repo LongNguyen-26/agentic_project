@@ -50,17 +50,16 @@ observability -> (setup_rag | setup_context) -> action_generation -> verifiabili
 - `tests/`: unit tests for retry behavior, verification, parser tiers, and planning.
 - `storage/`: runtime artifacts (session checkpoint, logs, caches, downloaded resources).
 
-## 🧠 ADR-01: Tiered OCR Strategy
+## 🧠 ADR-01: Parsing and OCR Strategy
 ### Decision
-Use tiered parsing/OCR to balance cost, speed, and robustness:
-1. **Tier 1**: PyMuPDF text layer extraction (+ pdfplumber table extraction).
-2. **Tier 2**: local Ollama vision OCR (`LOCAL_VISION_MODEL`, `OLLAMA_BASE_URL`).
-3. **Tier 3**: OpenAI vision OCR fallback.
+Use a two-path parser strategy:
+1. **PDF path**: page-wise extraction with PyMuPDF/PyMuPDF4LLM and image placeholder caching.
+2. **Image path**: OpenAI vision OCR after normalization.
 
 ### Why
-- Many PDFs already contain extractable text (cheapest and fastest path).
-- Local OCR reduces cloud dependency and can lower API cost.
-- Tier-3 fallback protects reliability when local OCR fails or text is insufficient.
+- Most resources are PDFs and benefit from robust page-level parsing plus placeholders.
+- Image resources require high-accuracy OCR and are handled directly by OpenAI vision.
+- This removes local runtime dependency drift and keeps behavior consistent across environments.
 
 ### Where in code
 - `tools/document_parser.py`

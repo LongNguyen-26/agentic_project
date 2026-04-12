@@ -17,21 +17,18 @@ class TieredParserTests(unittest.TestCase):
         out = parser.parse_resource_bytes("sample.txt", b"hello", "text/plain")
         self.assertEqual(out, "hello")
 
-    def test_image_escalates_to_tier3_when_tier2_insufficient(self):
+    def test_image_uses_openai_ocr_after_normalization(self):
         with mock.patch.object(
             parser,
             "_normalize_image_for_vision",
             return_value=(b"norm", "image/jpeg"),
         ) as m_norm, mock.patch.object(
-            parser, "_ocr_image_with_ollama", return_value=""
-        ) as m_tier2, mock.patch.object(
             parser, "_parse_single_image_with_openai", return_value="vision-output"
         ) as m_tier3:
             out = parser.parse_resource_bytes("sample.png", b"img-bytes", "image/png")
 
         self.assertEqual(out, "vision-output")
         self.assertEqual(m_norm.call_count, 1)
-        self.assertEqual(m_tier2.call_count, 1)
         self.assertEqual(m_tier3.call_count, 1)
 
 

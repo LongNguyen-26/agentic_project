@@ -82,18 +82,18 @@ What to check:
 2. Confirm `LLM_MAX_RETRIES`, `LLM_MAX_OUTPUT_TOKENS`, `VERIFICATION_MAX_OUTPUT_TOKENS` in `.env`.
 3. Re-run `python -m unittest tests.test_llm_client_overflow`.
 
-### 2) Cannot Connect to Local Ollama
+### 2) OpenAI Vision OCR Failure
 Symptoms:
-- Parser warning that local OCR is skipped or connection refused.
+- Parser warning that image OCR failed or returned empty content.
 
 What the code already does:
-- In `tools/document_parser.py`, Tier-2 local OCR is attempted only when `OLLAMA_BASE_URL` is reachable.
-- On failure, parser escalates to Tier-3 OpenAI vision OCR.
+- In `tools/document_parser.py`, image resources are normalized and sent directly to OpenAI vision OCR.
+- Parser keeps running even if OCR fails for a single image.
 
 What to check:
-1. Ensure Ollama service is running locally.
-2. Verify `OLLAMA_BASE_URL` and `LOCAL_VISION_MODEL` values in `.env`.
-3. If local OCR is optional for your run, keep OpenAI key active and allow fallback.
+1. Verify `OPENAI_API_KEY` in `.env`.
+2. Confirm model configuration (`MODEL_NAME`) supports image input.
+3. Check network access and API quota/rate limits.
 
 ### 3) Token Expiry or API Rate Limit
 Symptoms:

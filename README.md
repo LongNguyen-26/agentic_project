@@ -1,144 +1,130 @@
-# AI Agent (LangGraph)
+# DUT_Trust AI Agent
 
-## 🚀 Overview
-This project is an AI Agent for the **AI Agent Challenge**.
+## Overview
+This repository contains a LangGraph-based competition agent for two task families:
+- question-answering
+- folder-organisation
 
-It automates two task families from the competition server:
-- **question-answering**: extract grounded answers from as-built project documents.
-- **folder-organisation**: assign documents into valid target folders.
+The system uses a nested graph:
+- Outer Loop: `auth -> fetch -> planning -> process_task -> submit`
+- Inner Loop: `observability -> (setup_rag | setup_context) -> action_generation -> verifiability`
 
-The runtime uses a nested LangGraph design:
-- **Outer Loop** handles competition lifecycle (`auth -> fetch -> planning -> process_task -> submit`).
-- **Inner Loop** handles task solving (`observability -> retrieval/context -> action_generation -> verifiability`) with automatic self-correction.
+## Setup Instructions (For Organizers/Judges)
 
-## 🧩 Prerequisites
-- Python **>= 3.12**
-- Network access to competition API server
-- OpenAI API key for LLM/embedding operations
-- Optional: local Ollama for Tier-2 vision OCR fallback
+### 1. Prerequisites
+- Python 3.12+
+- Network access to the competition API
+- OpenAI API key
+- Optional but recommended: `uv` package manager for reproducible installs
 
-Required environment variables:
-- `COMPETITION_BASE_URL`
-- `API_KEY`
-- `OPENAI_API_KEY`
+### 2. Prepare Environment Variables
+Create `.env` from template:
 
-Optional local vision setup:
-- `OLLAMA_BASE_URL` (example: `http://localhost:11434`)
-- `LOCAL_VISION_MODEL` (default: `Qwen/Qwen2.5-VL-3B-Instruct`)
-
-If Ollama is not reachable, the parser automatically degrades to Tier-3 vision OCR (OpenAI).
-
-## 📦 Installation
-From the directory:
-
-```bash
-# 1) Create and activate your virtual environment
-python -m venv .venv
-.venv\Scripts\activate
-
-# 2) Install core dependencies
-pip install -e .
-
-# 3) (Optional) Install local OCR extras
-pip install -e ".[ocr]"
-```
-
-Create your environment file:
-
-```bash
+Windows (cmd):
+```bat
 copy .env.example .env
 ```
 
-Then fill required keys in `.env`.
+Windows (PowerShell):
+```powershell
+Copy-Item .env.example .env
+```
 
-## Submission Setup & Execution Instructions
-This section is intended for judge-side reproducible setup and execution.
-
-### 1) Prerequisites
-- Python **>= 3.12**
-- `uv` package manager
-
-### 2) Environment Setup
+Linux/macOS:
 ```bash
 cp .env.example .env
 ```
 
-Fill required keys in `.env`:
+Set required keys in `.env`:
 - `COMPETITION_BASE_URL`
 - `API_KEY`
 - `OPENAI_API_KEY`
 
-On Windows `cmd`, you can use:
+### 3. Install Dependencies
 
+#### Option A: uv (Recommended)
+Use lock-based installation for reproducibility.
+
+Windows/Linux/macOS:
 ```bash
-copy .env.example .env
+uv sync --frozen
 ```
 
-### 3) Install Dependencies
-Preferred (locked and reproducible from `uv.lock`):
+#### Option B: venv + pip (Fallback)
 
-```bash
-uv sync
-```
-
-Fallback (if `uv` is unavailable):
-
-```bash
+Windows (cmd):
+```bat
 python -m venv .venv
 .venv\Scripts\activate
+python -m pip install --upgrade pip
 pip install -e .
 ```
 
-### 4) Execute
+Windows (PowerShell):
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e .
+```
+
+Linux/macOS:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e .
+```
+
+### 4. Validate Installation
+Run a quick import check:
+
+```bash
+python -c "import langgraph, openai, instructor, pymupdf4llm; print('dependencies-ok')"
+```
+
+## Execution Instructions
+
+### 1. Run the agent
 ```bash
 python main.py
 ```
 
-### 5) Run Tests
-```bash
-python -m unittest discover -s tests
-```
-
-## ⚡ Quick Start
-Run the agent:
-
-```bash
-python main.py
-```
-
-Expected success signals in logs:
+### 2. Expected runtime signals
 - `[agent] Starting VPP AI Agent runtime`
-- `[agent] LangGraph compiled and execution loop starting`
-- `[auth] ...` session/auth is ready
+- `[auth] Checking authentication state`
 - `[task] Fetching next task`
-- `[Graph] Node 'process_task' ...` inner loop produced result
 - `[submit] Submit success for task_id=...`
 
-When no task is available:
-- `[loop] No more tasks available; stopping execution`
+### 3. Log location
+- Main log file: `storage/agent.log`
+- Session checkpoint: `storage/session_checkpoint.json`
 
-## 🗂️ Project Structure
-- `agent/`: graph wiring, routing, and node logic (outer + inner loops)
-- `clients/`: API client and LLM client wrappers
-- `tools/`: document parser, context manager, RAG engine
-- `models/`: typed schemas for API payloads and structured LLM outputs
-- `core/`: logger, checkpoint, and shared exceptions
-- `tests/`: unit tests for parser, loops, planning, overflow handling
-- `storage/`: runtime checkpoints, cache, and logs
+## Testing Instructions
 
-## 🧪 Testing
-Run all tests:
-
+Run full test suite:
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+python -m pytest tests -q
 ```
 
-Run a specific suite:
-
+Run parser-only tests:
 ```bash
-python -m unittest tests.test_llm_client_overflow
+python -m pytest tests/test_document_parser.py -q
 ```
 
-## 📚 More Docs
-- `ARCHITECTURE.md`: detailed system map and design decisions
-- `CONTRIBUTING.md`: developer workflow, extension guide, troubleshooting
+## Reproducibility Notes
+- Use `uv sync --frozen` to match the lockfile exactly.
+- Use the same Python major/minor version across environments.
+- Keep `.env` local and never commit secrets.
+
+## Repository Structure
+- `agent/`: graph composition, routers, and nodes
+- `clients/`: competition and LLM clients
+- `tools/`: parser, context manager, RAG, vision tool
+- `models/`: pydantic schemas for API and LLM structured outputs
+- `core/`: logger, checkpoints, shared exceptions
+- `tests/`: unit tests
+
+## Additional Documents
+- `ARCHITECTURE.md`
+- `CONTRIBUTING.md`

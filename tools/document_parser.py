@@ -8,7 +8,6 @@ import concurrent.futures
 
 import fitz
 import pymupdf4llm
-import requests
 from openai import OpenAI
 
 from config import config
@@ -35,10 +34,6 @@ def _encode_image(image_bytes: bytes) -> str:
 
 def _to_data_url(image_bytes: bytes, mime: str) -> str:
     return f"data:{mime};base64,{_encode_image(image_bytes)}"
-
-
-def _is_sufficient_text(text: str) -> bool:
-    return len((text or "").strip()) >= max(config.PARSER_MIN_TEXT_CHARS, 100)
 
 
 def _fitz_filetype_from_mime(mime: str) -> Optional[str]:
@@ -73,39 +68,6 @@ def _clean_parsed_text(text: str) -> str:
     # Remove image block boundary tags.
     text = re.sub(r'\*\*----- (Start|End) of picture text -----\*\*(<br>)?\n?', '', text)
     return text.strip()
-
-
-def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
-    """Tier 2: OCR image content using local Ollama vision model."""
-    if not config.OLLAMA_BASE_URL or not config.LOCAL_VISION_MODEL:
-        return ""
-
-    prompt = (
-        "You are a strict OCR engine. Extract all text, numbers, formulas, and tables from this image EXACTLY as they appear. "
-        "Rules: "
-        "1. DO NOT make up, guess, or infer any information. "
-        "2. Keep the original language (e.g., Japanese, Vietnamese, English). "
-        "3. Preserve all mathematical formulas and technical units. "
-        "4. Format tabular data as Markdown tables."
-    )
-    payload = {
-        "model": config.LOCAL_VISION_MODEL,
-        "prompt": prompt,
-        "images": [_encode_image(image_bytes)],
-        "stream": False,
-    }
-
-    try:
-        response = requests.post(
-            f"{config.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
-            json=payload,
-            timeout=config.LOCAL_VISION_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return str(data.get("response", "")).strip()
-    except Exception:
-        return ""
 
 
 def _parse_single_image_with_openai(image_bytes: bytes, mime: str) -> str:
@@ -258,14 +220,9 @@ def parse_resource_bytes(file_path: str, content: bytes, content_type: Optional[
 
     if lowered.endswith((".png", ".jpg", ".jpeg", ".webp")):
         normalized_bytes, normalized_mime = _normalize_image_for_vision(content, mime or "image/jpeg")
-        
-        local_text = _ocr_image_with_ollama(normalized_bytes, normalized_mime)
-        if _is_sufficient_text(local_text):
-            logger.info("[parser] Image Tier 2 (Ollama) hit.")
-            return _clean_parsed_text(local_text)
 
-        logger.info("[parser] Image escalating to Tier 3 (OpenAI).")
+        logger.info("[parser] Sending image to OpenAI Vision OCR.")
         openai_text = _parse_single_image_with_openai(normalized_bytes, normalized_mime)
-        return _clean_parsed_text(openai_text or local_text)
+        return _clean_parsed_text(openai_text)
 
     return content.decode("utf-8", errors="replace")

@@ -37,11 +37,6 @@ class Settings:
 	MODEL_REASONING_ID: str = os.getenv("REASONING_MODEL", "o3-mini")
 	# MODEL_REASONING_ID: str = os.getenv("REASONING_MODEL", "gpt-5.3-chat-latest")
 
-	# ── VLM (local OCR model) ──────────────────────────────────────────────────
-	LOCAL_VISION_MODEL: str = os.getenv("LOCAL_VISION_MODEL") or os.getenv("VLM_MODEL_NAME", "Qwen/Qwen2.5-VL-3B-Instruct")
-	OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "")
-	TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0.1"))
-
 	# ── Runtime/Resilience ─────────────────────────────────────────────────────
 	STORAGE_ROOT: str = os.getenv("STORAGE_ROOT", str(Path("storage")))
 
@@ -89,9 +84,7 @@ class Settings:
 	# RAG prompt rendering controls to reduce repeated summary bloat.
 	RAG_SUMMARY_MAX_CHARS: int = int(os.getenv("RAG_SUMMARY_MAX_CHARS", "280"))
 	
-	PARSER_MIN_TEXT_CHARS: int = int(os.getenv("PARSER_MIN_TEXT_CHARS", "100"))
 	PDF_OCR_MAX_PAGES: int = int(os.getenv("PDF_OCR_MAX_PAGES", "30"))
-	LOCAL_VISION_TIMEOUT_SECONDS: float = float(os.getenv("LOCAL_VISION_TIMEOUT_SECONDS", "90"))
 
 	# ── QA Retrieval and Verification ───────────────────────────────────────────
 	# Number of attached documents required before QA switches to RAG branch.
