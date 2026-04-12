@@ -289,8 +289,8 @@ class LLMService:
                 temperature=0.0,
             )
             return response.task_type
-        except Exception:
-            logger.warning("[llm] Task classification failed; defaulting to question-answering", exc_info=True)
+        except Exception as e:
+            logger.warning(f"[llm] Task classification failed ({type(e).__name__}: {e}); defaulting to question-answering")
             return "question-answering"
 
     def extract_planning_hints(
@@ -315,8 +315,9 @@ class LLMService:
                 temperature=0.2,
                 reasoning_effort="high",
             )
-        except Exception:
-            logger.warning("[llm] Planning hints extraction failed; continue without hints", exc_info=True)
+        except Exception as e:
+            # Bỏ exc_info=True và chỉ log ra message của lỗi
+            logger.warning(f"[llm] Planning hints extraction failed ({type(e).__name__}: {e}); continue without hints")
             return ""
 
         parts: List[str] = []

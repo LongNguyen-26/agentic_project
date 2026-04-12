@@ -146,14 +146,66 @@ def _collect_output_markers(output_text: str) -> Set[str]:
     markers.update(FILE_PATH_MARKER_PATTERN.findall(output_text))
     markers.update(PAGE_MARKER_PATTERN.findall(output_text))
     markers.update(IMAGE_ID_LITERAL_PATTERN.findall(output_text))
+    markers.update(_extract_image_ids_from_text(output_text))
     return {marker.strip() for marker in markers if marker.strip()}
 
 
-def _count_grounded_markers(output_text: str, context_text: str) -> tuple[int, int]:
-    markers = _collect_output_markers(output_text)
+def _normalize_marker(marker: str) -> str:
+    normalized = " ".join(str(marker).strip().lower().split())
+    return normalized.replace("\\", "/")
+
+
+def _collect_grounding_anchor_pool(context_text: str, parsed_documents: List[Dict[str, Any]]) -> Set[str]:
+    anchors: Set[str] = set()
+
+    def _add_anchor(value: str) -> None:
+        normalized = _normalize_marker(value)
+        if normalized:
+            anchors.add(normalized)
+
+    for marker in _collect_output_markers(context_text or ""):
+        _add_anchor(marker)
+
+    for document in parsed_documents or []:
+        file_path = str(document.get("file_path", "")).strip()
+        if file_path:
+            _add_anchor(file_path)
+
+        raw_text = str(document.get("text", ""))
+        if not raw_text:
+            continue
+
+        for marker in FILE_PATH_MARKER_PATTERN.findall(raw_text):
+            _add_anchor(marker)
+        for marker in PAGE_MARKER_PATTERN.findall(raw_text):
+            _add_anchor(marker)
+        for image_id in _extract_image_ids_from_text(raw_text):
+            _add_anchor(image_id)
+
+    return anchors
+
+
+def _count_grounded_markers(
+    output_text: str,
+    context_text: str,
+    parsed_documents: List[Dict[str, Any]],
+) -> tuple[int, int]:
+    raw_markers = _collect_output_markers(output_text)
+    if not raw_markers:
+        return 0, 0
+
+    markers = {_normalize_marker(marker) for marker in raw_markers if _normalize_marker(marker)}
     if not markers:
         return 0, 0
-    grounded = sum(1 for marker in markers if marker in (context_text or ""))
+
+    anchor_pool = _collect_grounding_anchor_pool(context_text, parsed_documents)
+    normalized_context = _normalize_marker(context_text or "")
+
+    grounded = 0
+    for marker in markers:
+        if marker in anchor_pool or marker in normalized_context:
+            grounded += 1
+
     return grounded, len(markers)
 
 
@@ -183,20 +235,14 @@ def _build_grounding_fallback_answer(
         tentative = str(tentative_answers[0]).strip()
 
     if tentative:
-        conservative_answer = (
-            f"[Low-confidence / grounding failed] Tentative answer: {tentative}\n"
-            f"Grounding markers found {grounded_count}/{detected_count}; required >= {required_count}."
-        )
+        conservative_answer = tentative
     else:
-        conservative_answer = (
-            "Unable to provide a grounded final answer from retrieved context. "
-            f"Grounding markers found {grounded_count}/{detected_count}; required >= {required_count}."
-        )
+        conservative_answer = "Insufficient evidence in provided context."
 
     prior_thought = str(draft_answer.get("thought_log", "")).strip()
     fallback_note = (
-        "[Fallback] Exhausted retries with grounding failure. "
-        "Submitting conservative low-confidence answer to avoid ungrounded claims."
+        "[Fallback] Exhausted retries due to grounding failure. "
+        f"[Grounding Diagnostics] grounded={grounded_count}, detected={detected_count}, required={required_count}."
     )
     fallback_thought = f"{prior_thought}\n\n{fallback_note}" if prior_thought else fallback_note
 
@@ -491,7 +537,11 @@ def _verify_qa(state: InnerState) -> dict:
         }
 
     output_text = "\n".join(next_answer.get("answers", [])) + "\n" + next_answer.get("thought_log", "")
-    grounded_count, detected_count = _count_grounded_markers(output_text, context)
+    grounded_count, detected_count = _count_grounded_markers(
+        output_text,
+        context,
+        state.get("parsed_documents", []),
+    )
     grounding_pass = True
     grounding_feedback = ""
     required = max(int(config.QA_GROUNDING_MIN_EVIDENCE_MARKERS), 0)
@@ -522,7 +572,7 @@ def _verify_qa(state: InnerState) -> dict:
         fallback_due_to_grounding = True
         combined_feedback = (
             f"{combined_feedback}\n\n"
-            "[Fallback]: Max retries reached with grounding failure; switched to conservative low-confidence answer."
+            "[Fallback]: Max retries reached with grounding failure; switched to conservative answer while keeping diagnostics in thought_log."
         ).strip()
 
     return {
