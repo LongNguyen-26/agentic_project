@@ -77,15 +77,6 @@ FORCED_VISION_KEYWORDS = (
 FORCED_VISION_MAX_IMAGES = 8
 
 
-def _extract_selected_folders_from_thought_log(thought_log: str) -> List[str]:
-    selected: List[str] = []
-    for line in thought_log.splitlines():
-        match = FOLDER_LINE_PATTERN.match(line)
-        if match:
-            selected.append(match.group(1).strip())
-    return selected
-
-
 def _extract_sort_entries_from_thought_log(thought_log: str) -> List[Dict[str, str]]:
     entries: List[Dict[str, str]] = []
     current_file = ""
@@ -369,14 +360,15 @@ def _generate_qa_action(state: InnerState, feedback: str) -> dict:
         ),
     )
 
-    if draft_response.needs_image_analysis:
+    if draft_response.requires_vision_tool:
         target_ids = [img_id.strip() for img_id in draft_response.target_image_ids if img_id.strip()]
-        if target_ids:
-            return {
-                "tool_calls": target_ids,
-                "vision_prompt": draft_response.vision_prompt.strip(),
-                "confidence_score": float(draft_response.confidence),
-            }
+        return {
+            "tool_calls": target_ids,
+            "vision_prompt": draft_response.vision_prompt.strip(),
+            "confidence_score": float(draft_response.confidence),
+        }
+
+    if draft_response.needs_image_analysis:
         logger.warning("[Action] needs_image_analysis=True but no target_image_ids were returned")
 
     response_payload = {
@@ -549,8 +541,8 @@ def _verify_qa(state: InnerState) -> dict:
         if detected_count == 0 or grounded_count < required:
             grounding_pass = False
             grounding_feedback = (
-                f"Grounding thiếu bằng chứng: grounded={grounded_count}, detected={detected_count}, "
-                f"required={required}. Hãy trích dẫn rõ file path/page/image id từ context."
+                f"Grounding evidence is insufficient: grounded={grounded_count}, detected={detected_count}, "
+                f"required={required}. Cite explicit file path/page/image id anchors from context."
             )
 
     answer_log = _append_answer_log(
@@ -586,13 +578,13 @@ def _verify_qa(state: InnerState) -> dict:
     }
 
 def observability_node(state: InnerState) -> dict:
-    """Thu thập tài nguyên, parse văn bản và chuẩn bị context đầu vào.
+    """Collect resources, parse content, and prepare source context.
 
     Args:
-        state: Trạng thái inner loop chứa thông tin task, token, resources.
+        state: Inner-loop state containing task metadata, credentials, and resources.
 
     Returns:
-        dict: Các khóa cập nhật gồm parsed_documents, parsed_text, use_rag, used_tools.
+        dict: Updated keys including parsed_documents, parsed_text, use_rag, and used_tools.
     """
     logger.info(
         "[Observability] task_id=%s type=%s resources=%s",
@@ -640,7 +632,7 @@ def observability_node(state: InnerState) -> dict:
                 observability_node._in_memory_cache[file_path] = text
                 save_parsed_text_cache(file_path, text)
 
-        # 4. Tiếp tục luồng tóm tắt nội dung file (Summary Cache)
+        # Continue file-summary flow using cache-aware summarization.
         summary, cache_hit = get_or_create_file_summary(
             file_path=file_path,
             raw_text=text,
@@ -666,18 +658,18 @@ def observability_node(state: InnerState) -> dict:
     }
 
 def setup_rag_node(state: InnerState) -> dict:
-    """Tạo ngữ cảnh rút gọn bằng RAG cho bài toán QA nhiều tài liệu.
+    """Build condensed retrieval context for multi-document QA tasks.
 
     Args:
-        state: Trạng thái inner loop đã có parsed_documents và prompt_template.
+        state: Inner-loop state with parsed_documents and prompt_template.
 
     Returns:
-        dict: Context đã truy hồi và danh sách used_tools được cập nhật.
+        dict: Retrieved context and updated used_tools list.
     """
     logger.info("[Context] Using RAG retrieval for task_id=%s", state.get("task_id"))
     query = state.get("prompt_template", "")
     
-    # SỬA Ở ĐÂY: Truyền parsed_documents thay vì parsed_text
+    # Pass parsed_documents instead of raw parsed_text.
     parsed_documents = state.get("parsed_documents", [])
     context = build_and_retrieve_context(parsed_documents, query, top_k=config.RAG_TOP_K)
     
@@ -686,13 +678,13 @@ def setup_rag_node(state: InnerState) -> dict:
     return {"retrieved_context": context, "used_tools": used_tools}
 
 def setup_context_manager_node(state: InnerState) -> dict:
-    """Dựng ngữ cảnh từ toàn bộ tài liệu khi không dùng RAG.
+    """Build context from full parsed data when RAG is not used.
 
     Args:
-        state: Trạng thái inner loop chứa parsed_documents hoặc parsed_text.
+        state: Inner-loop state containing parsed_documents or parsed_text.
 
     Returns:
-        dict: Context đầy đủ và danh sách used_tools được cập nhật.
+        dict: Full context and updated used_tools list.
     """
     logger.info("[Context] Using full context manager for task_id=%s", state.get("task_id"))
     context = format_context_from_documents(state.get("parsed_documents", []))
@@ -703,13 +695,13 @@ def setup_context_manager_node(state: InnerState) -> dict:
     return {"retrieved_context": context, "used_tools": used_tools}
 
 def action_generation_node(state: InnerState) -> dict:
-    """Sinh đáp án theo task_type và trả về structured output cho bước kiểm duyệt.
+    """Generate draft output by task_type for the verification stage.
 
     Args:
-        state: Trạng thái inner loop chứa context, prompt và feedback kiểm duyệt.
+        state: Inner-loop state with context, prompt, and verifier feedback.
 
     Returns:
-        dict: draft_answer, action_plan và confidence_score cho bước tiếp theo.
+        dict: draft_answer, action_plan, and confidence_score for the next step.
     """
     logger.info(
         "[Action] Generating response task_id=%s attempt=%s",
@@ -729,7 +721,7 @@ def vision_tool_node(state: InnerState) -> dict:
     """Execute vision analysis for requested image IDs and append observation.
 
     Args:
-        state: Trạng thái inner loop chứa tool_calls và vision_prompt.
+        state: Inner-loop state containing tool_calls and vision_prompt.
 
     Returns:
         dict: Updates tool_observations and clears tool_calls to avoid infinite loop.
@@ -770,13 +762,13 @@ def vision_tool_node(state: InnerState) -> dict:
     }
 
 def verifiability_node(state: InnerState) -> dict:
-    """Tự kiểm duyệt đáp án, phát sinh feedback và quyết định trạng thái xác thực.
+    """Self-verify the draft answer and decide pass/retry status.
 
     Args:
-        state: Trạng thái inner loop chứa draft_answer, context và thông tin attempts.
+        state: Inner-loop state with draft_answer, context, and retry counters.
 
     Returns:
-        dict: draft_answer mới, confidence_score, is_verified, verification_feedback, attempts.
+        dict: Updated draft_answer, confidence_score, is_verified, feedback, and attempts.
     """
     logger.info("[Verifiability] Checking answer consistency for task_id=%s", state.get("task_id"))
 

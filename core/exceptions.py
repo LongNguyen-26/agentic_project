@@ -1,43 +1,43 @@
 # core/exceptions.py
 
 class AgentBaseException(Exception):
-    """Lớp Exception cơ sở cho toàn bộ Agent."""
+    """Base exception class for the entire agent runtime."""
     pass
 
 # ==========================================
-# Nhóm lỗi liên quan đến API Cuộc thi (Outer Loop)
+# Competition API related errors (Outer Loop)
 # ==========================================
 class CompetitionAPIError(AgentBaseException):
-    """Lỗi chung khi gọi API BTC."""
+    """Generic error while calling competition APIs."""
     pass
 
 class AuthenticationError(CompetitionAPIError):
-    """Lỗi xác thực (sai API Key, Token hết hạn)."""
+    """Authentication failed (invalid key or expired token)."""
     pass
 
 class RateLimitExceededError(CompetitionAPIError):
-    """Lỗi 429: Gửi request quá nhanh."""
+    """HTTP 429: requests were sent too quickly."""
     pass
 
 class NoMoreTasksError(CompetitionAPIError):
-    """BTC không còn task nào để cấp phát."""
+    """No more tasks are available from the competition server."""
     pass
 
 # ==========================================
-# Nhóm lỗi liên quan đến Xử lý Task (Inner Loop)
+# Task processing related errors (Inner Loop)
 # ==========================================
 class DocumentParseError(AgentBaseException):
-    """Lỗi không thể đọc hoặc parse file PDF/Ảnh."""
+    """Failed to read or parse PDF/image resources."""
     pass
 
 class VectorDBError(AgentBaseException):
-    """Lỗi khi khởi tạo hoặc query RAG (FAISS/OpenAI)."""
+    """Failed to initialize or query RAG components (FAISS/OpenAI)."""
     pass
 
 class LLMGenerationError(AgentBaseException):
-    """Lỗi từ phía OpenAI hoặc Instructor khi sinh kết quả."""
+    """LLM generation failed in OpenAI or Instructor pipeline."""
     pass
 
 class VerificationFailedError(AgentBaseException):
-    """Task không vượt qua được bài test self-correction sau n lần thử."""
+    """Task failed self-correction validation after maximum retries."""
     pass

@@ -36,7 +36,7 @@ class RagEngineUpgradeTests(unittest.TestCase):
         self.assertEqual(chunk_docs[0].metadata.get("file_path"), "Public/a.pdf")
         self.assertEqual(chunk_docs[0].metadata.get("summary"), "Summary A")
         self.assertIn("This is content A.", chunk_docs[0].page_content)
-        self.assertNotIn("[Nguồn:", chunk_docs[0].page_content)
+        self.assertNotIn("[Source:", chunk_docs[0].page_content)
 
     def test_render_documents_for_prompt_includes_metadata_prefix(self):
         docs = [
@@ -48,7 +48,7 @@ class RagEngineUpgradeTests(unittest.TestCase):
 
         rendered = rag_engine._render_documents_for_prompt(docs)
 
-        self.assertIn("[Nguồn: Public/b.pdf - Tóm tắt: Summary B]", rendered)
+        self.assertIn("[Source: Public/b.pdf - Summary: Summary B]", rendered)
         self.assertIn("chunk body", rendered)
 
     def test_build_and_retrieve_context_reranks_candidates_before_top_k_slice(self):
@@ -83,7 +83,7 @@ class RagEngineUpgradeTests(unittest.TestCase):
 
         self.assertIn("documents", captured)
         self.assertEqual(len(captured["documents"]), 2)
-        self.assertNotIn("[Nguồn:", captured["documents"][0].page_content)
+        self.assertNotIn("[Source:", captured["documents"][0].page_content)
         self.assertIn("Public/file-2.pdf", context)
         self.assertNotIn("Public/file-1.pdf", context)
 

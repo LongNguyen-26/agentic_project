@@ -1,7 +1,7 @@
 # agent/graph.py
-"""Định nghĩa StateGraph tổng thể cho VPP agent theo mô hình Outer/Inner Loop.
+"""Define the full VPP agent StateGraph with Outer/Inner loop topology.
 
-Luồng tổng quan:
+High-level flow:
 
         OUTER LOOP (Competition Lifecycle)
         +------+     +-------+     +----------+     +-------------+     +--------+
@@ -11,7 +11,7 @@ Luồng tổng quan:
                                          +------------------- no task ------------------------+
                                                                                  -> END
 
-        INNER LOOP (Per-task Processing, gọi trong process_task)
+        INNER LOOP (Per-task Processing, invoked from process_task)
         +---------------+
         | observability |
         +---------------+
@@ -48,12 +48,14 @@ Luồng tổng quan:
                      END
 """
 
+from typing import Any
+
 from langgraph.graph import StateGraph, END
 
 from core.logger import get_logger
 from .state import InnerState, OuterState
 
-# Hướng dẫn: Import các hàm node của bạn (Tự định nghĩa logic bên trong file nodes/*)
+# Import node implementations from agent/nodes.
 from .nodes.inner_loop import (
     observability_node, 
     setup_rag_node, 
@@ -73,7 +75,7 @@ logger = get_logger(__name__)
 # ==========================================
 inner_workflow = StateGraph(InnerState)
 
-# Thêm Nodes
+# Add nodes.
 inner_workflow.add_node("observability", observability_node)
 inner_workflow.add_node("setup_rag", setup_rag_node)
 inner_workflow.add_node("setup_context", setup_context_manager_node)
@@ -81,10 +83,10 @@ inner_workflow.add_node("action_generation", action_generation_node)
 inner_workflow.add_node("vision_tool", vision_tool_node)
 inner_workflow.add_node("verifiability", verifiability_node)
 
-# Định nghĩa Luồng (Edges)
+# Define edges.
 inner_workflow.set_entry_point("observability")
 
-# Từ Observability -> Quyết định dùng RAG hay Context
+# From observability, route to RAG or full-context branch.
 inner_workflow.add_conditional_edges(
     "observability",
     route_rag_or_context,
@@ -94,11 +96,11 @@ inner_workflow.add_conditional_edges(
     }
 )
 
-# Cả RAG và Context đều dẫn về Action Generation
+# Both branches return to action generation.
 inner_workflow.add_edge("setup_rag", "action_generation")
 inner_workflow.add_edge("setup_context", "action_generation")
 
-# Action Generation -> Vision Tool hoặc Verifiability
+# Route action generation to vision tool or verifier.
 inner_workflow.add_conditional_edges(
     "action_generation",
     route_after_action,
@@ -111,35 +113,35 @@ inner_workflow.add_conditional_edges(
 # ReAct loop: Tool observation -> Action Generation
 inner_workflow.add_edge("vision_tool", "action_generation")
 
-# Vòng lặp Self-Correction (Verifiability -> Action Generation)
+# Self-correction loop (verifiability -> action_generation).
 inner_workflow.add_conditional_edges(
     "verifiability",
     check_verification,
     {
-        "retry": "action_generation", # Phản hồi từ verifiability sẽ giúp action_generation làm tốt hơn
+        "retry": "action_generation",  # Verifier feedback guides the next action step.
         "pass": END
     }
 )
 
-# Đóng gói Inner Graph
+# Compile inner graph.
 inner_app = inner_workflow.compile()
 
 # ==========================================
-# 2. BỌC INNER GRAPH VÀO 1 NODE CỦA OUTER GRAPH
+# 2. WRAP INNER GRAPH AS AN OUTER NODE
 # ==========================================
-def process_task_node(state: OuterState) -> dict:
-    """Cầu nối outer loop để thực thi inner loop cho một task cụ thể.
+def process_task_node(state: OuterState) -> dict[str, Any]:
+    """Bridge the outer loop to execute inner loop for one task.
 
     Args:
-        state: Trạng thái outer loop chứa current_task, auth info và planning hints.
+        state: Outer-loop state with current_task, auth info, and planning hints.
 
     Returns:
-        dict: task_result đã được tổng hợp từ draft_answer cuối của inner loop.
+        dict[str, Any]: task_result assembled from final inner-loop draft_answer.
     """
     task = state["current_task"]
     logger.info("[task] Processing task_id=%s type=%s", task.get("id"), task.get("type"))
 
-    # Khởi tạo trạng thái cho vòng lặp trong
+    # Initialize inner-loop state.
     initial_inner_state = {
         "task_id": task.get("id"),
         "task_type": task.get("type") or "question-answering",
@@ -166,10 +168,10 @@ def process_task_node(state: OuterState) -> dict:
         "is_verified": False,
     }
 
-    # KÍCH HOẠT INNER GRAPH
+    # Execute inner graph.
     final_inner_state = inner_app.invoke(initial_inner_state)
 
-    # Lấy đáp án cuối cùng (đã qua kiểm duyệt) trả về cho vòng lặp ngoài
+    # Extract final verified answer for outer loop submission.
     draft = final_inner_state.get("draft_answer", {})
     task_result = {
         "answers": draft.get("answers", []),
@@ -185,18 +187,18 @@ def process_task_node(state: OuterState) -> dict:
 # ==========================================
 outer_workflow = StateGraph(OuterState)
 
-# Thêm Nodes
+# Add nodes.
 outer_workflow.add_node("auth", auth_node)
 outer_workflow.add_node("fetch", fetch_task_node)
 outer_workflow.add_node("planning", planning_node)
-outer_workflow.add_node("process_task", process_task_node) # Node gọi Inner Graph
+outer_workflow.add_node("process_task", process_task_node)  # Node that executes inner graph.
 outer_workflow.add_node("submit", submit_node)
 
-# Định nghĩa Luồng (Edges)
+# Define edges.
 outer_workflow.set_entry_point("auth")
 outer_workflow.add_edge("auth", "fetch")
 
-# Nếu lấy được task -> process, nếu rỗng -> END (chờ task mới hoặc tắt agent)
+# If a task is available, continue processing; otherwise end.
 outer_workflow.add_conditional_edges(
     "fetch",
     route_outer_loop,
@@ -209,7 +211,7 @@ outer_workflow.add_conditional_edges(
 outer_workflow.add_edge("planning", "process_task")
 
 outer_workflow.add_edge("process_task", "submit")
-outer_workflow.add_edge("submit", "fetch") # Nộp xong lập tức lấy task mới
+outer_workflow.add_edge("submit", "fetch")  # Fetch next task right after submit.
 
-# Đóng gói toàn bộ hệ thống
+# Compile full system graph.
 agent_app = outer_workflow.compile()

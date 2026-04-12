@@ -1,10 +1,10 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel
 
 
 class SessionRequest(BaseModel):
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -22,8 +22,8 @@ class Resource(BaseModel):
 
 class TaskResponse(BaseModel):
     task_id: str
-    phase: Optional[int] = None
-    type: Optional[str] = None
+    phase: int | None = None
+    type: str | None = None
     prompt_template: str
     resources: List[Resource]
 

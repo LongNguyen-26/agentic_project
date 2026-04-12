@@ -68,7 +68,7 @@ Valid folders:
 """
 
 
-# Mở file agent/prompts/sys_prompts.py, sửa biến SYS_CLASSIFY_TASK
+# Task classification system prompt.
 SYS_CLASSIFY_TASK = """You are a highly accurate task routing classifier for a document processing agent.
 Classify the given task prompt into exactly one of the two following task_types:
 

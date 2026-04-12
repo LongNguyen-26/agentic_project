@@ -316,7 +316,7 @@ class LLMService:
                 reasoning_effort="high",
             )
         except Exception as e:
-            # Bỏ exc_info=True và chỉ log ra message của lỗi
+            # Keep warning concise and continue without planning hints.
             logger.warning(f"[llm] Planning hints extraction failed ({type(e).__name__}: {e}); continue without hints")
             return ""
 
@@ -327,7 +327,7 @@ class LLMService:
                 parts.append(f"{idx}. {cleaned}")
         caution = response.caution.strip()
         if caution:
-            parts.append(f"Luu y tong quat: {caution}")
+            parts.append(f"General caution: {caution}")
         return "\n".join(parts)
 
     def generate_action_response(

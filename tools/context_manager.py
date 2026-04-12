@@ -49,7 +49,7 @@ def _cache_key(file_path: str, raw_text: str) -> str:
 
 def _clean_text(raw_text: str) -> str:
     """Normalize whitespace to reduce prompt token usage but PRESERVE NEWLINES."""
-    # Chỉ gom các dấu cách và tab thừa thành 1 dấu cách, KHÔNG xóa \n
+    # Collapse repeated spaces/tabs without removing newline boundaries.
     return re.sub(r'[ \t]+', ' ', raw_text)
 
 
@@ -59,9 +59,9 @@ def _fallback_summary(file_path: str, raw_text: str) -> str:
     preview = cleaned[:500]
     char_count = len(cleaned)
     return (
-        f"Tai lieu {file_path} da duoc phan tich. "
-        f"Tong do dai van ban sau chuan hoa: {char_count} ky tu. "
-        f"Tom tat noi dung chinh (cat ngan): {preview}"
+        f"Document {file_path} was parsed successfully. "
+        f"Normalized text length: {char_count} characters. "
+        f"Content preview: {preview}"
     )
 
 
@@ -92,7 +92,7 @@ def get_or_create_file_summary(
 
     cleaned = _clean_text(raw_text)
     if not cleaned:
-        summary = f"Tai lieu {file_path} khong co noi dung van ban de tom tat."
+        summary = f"Document {file_path} does not contain extractable text to summarize."
     elif llm_service is None:
         summary = _fallback_summary(file_path=file_path, raw_text=cleaned)
     else:
@@ -136,9 +136,9 @@ def format_full_context(raw_text: str) -> str:
     """Format full raw text context for non-RAG processing."""
     cleaned_text = _clean_text(raw_text)
     return (
-        "[BAT DAU TAI LIEU GOC]\n"
+        "[BEGIN RAW SOURCE DOCUMENT]\n"
         f"{cleaned_text}\n"
-        "[KET THUC TAI LIEU GOC]"
+        "[END RAW SOURCE DOCUMENT]"
     )
 
 
@@ -149,13 +149,13 @@ def format_context_from_documents(parsed_documents: List[Dict[str, Any]]) -> str
         file_path = doc.get("file_path", "unknown")
         summary = (doc.get("summary") or "").strip()
         if summary:
-            blocks.append(f"[FILE] {file_path}\n[TOM TAT]\n{summary}")
+            blocks.append(f"[FILE] {file_path}\n[SUMMARY]\n{summary}")
             continue
         text = _clean_text(str(doc.get("text", "")))
         blocks.append(f"[FILE] {file_path}\n{text[:30000]}")
     joined = "\n\n".join(blocks).strip()
     return (
-        "[BAT DAU NGU CANH DA NEN]\n"
+        "[BEGIN COMPRESSED CONTEXT]\n"
         f"{joined}\n"
-        "[KET THUC NGU CANH DA NEN]"
+        "[END COMPRESSED CONTEXT]"
     )

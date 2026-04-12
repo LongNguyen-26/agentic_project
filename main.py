@@ -1,6 +1,7 @@
 # main.py
 import sys
 import time
+from typing import Any
 
 from core.logger import get_logger, setup_logging
 from core.checkpoint import load_checkpoint
@@ -9,7 +10,8 @@ from core.checkpoint import load_checkpoint
 logger = get_logger(__name__)
 
 
-def _is_meaningful_value(value):
+def _is_meaningful_value(value: Any) -> bool:
+    """Return True when value contains useful non-empty payload."""
     return value not in (None, "", [], {})
 
 
@@ -20,14 +22,14 @@ def _extract_important_updates(state_update: dict) -> dict:
         if key in state_update and _is_meaningful_value(state_update.get(key)):
             important[key] = state_update.get(key)
 
-    # ---> THÊM LOGIC TRÍCH XUẤT THÔNG TIN TASK TẠI ĐÂY <---
+    # Extract compact task details for concise log output.
     current_task = state_update.get("current_task")
     if isinstance(current_task, dict):
         if _is_meaningful_value(current_task.get("type")):
             important["task_type"] = current_task.get("type")
         if _is_meaningful_value(current_task.get("prompt_template")):
             pt = current_task.get("prompt_template")
-            # Cắt ngắn prompt template (ví dụ 100 ký tự) để log không bị quá dài
+            # Truncate prompt template to avoid oversized log lines.
             important["prompt_template"] = (pt[:100] + "...") if len(pt) > 100 else pt
 
     task_result = state_update.get("task_result")
@@ -39,15 +41,15 @@ def _extract_important_updates(state_update: dict) -> dict:
 
     return important
 
-def main():
+def main() -> None:
     setup_logging()
     logger.info("[agent] Starting VPP AI Agent runtime")
     from agent.graph import agent_app  # Import after logging bootstrap.
     
-    # 1. Thử phục hồi Session từ ổ cứng (để không phải đăng nhập lại nếu bị crash)
+    # 1. Restore session checkpoint from disk when available.
     session_id, access_token = load_checkpoint()
     
-    # 2. Khởi tạo Trạng thái Vòng lặp ngoài (Outer State)
+    # 2. Initialize outer-loop state.
     initial_state = {
         "session_id": session_id,
         "access_token": access_token,
@@ -60,11 +62,11 @@ def main():
     
     logger.info("[agent] LangGraph compiled and execution loop starting")
     
-    # 3. Chạy vòng lặp vô hạn của đồ thị
-    # Sử dụng .stream() thay vì .invoke() để in ra log từng bước mượt mà hơn
+    # 3. Run the graph loop continuously.
+    # Use .stream() instead of .invoke() for step-by-step logging.
     try:
-        # Trong graph.py, luồng đi từ submit -> fetch tạo thành vòng lặp.
-        # Chúng ta dùng "recursion_limit" cao để agent cắm chuột chạy liên tục.
+        # The submit -> fetch edge forms a persistent loop.
+        # Keep recursion_limit high for long-running task processing.
         config = {"recursion_limit": 1000} 
         
         for output in agent_app.stream(initial_state, config=config, stream_mode="updates"):
@@ -82,23 +84,23 @@ def main():
                 else:
                     logger.debug("[Graph] Node '%s' completed (no important updates)", node_name)
 
-                # Một số node có thể không ghi state (None), cần chặn an toàn.
+                # Some nodes may emit no state updates; guard safely.
                 if state_update.get("should_continue") is False:
                     logger.info("[loop] No more tasks available; stopping execution")
                     return
                     
-            # Thay đổi logic sleep linh hoạt (Adaptive Throttling)
+            # Adaptive throttling between node executions.
             if node_name in ["fetch", "submit"]:
-                time.sleep(0.5) # Chỉ nghỉ lâu sau khi giao tiếp với Server BTC
+                time.sleep(0.5)  # Slightly longer pause after API interactions.
             else:
-                time.sleep(0.05) # Nghỉ rất ngắn giữa các node tính toán cục bộ # Nghỉ 1s giữa các node để tránh quá tải CPU/Rate limit
+                time.sleep(0.05)  # Short pause for local compute nodes.
             
     except KeyboardInterrupt:
         logger.warning("[agent] Process interrupted by user (Ctrl+C)")
         sys.exit(0)
     except Exception as e:
         logger.error("[agent] Unexpected fatal error: %s", e, exc_info=True)
-        # Ở đây có thể thêm logic gửi thông báo qua Telegram/Discord cho dev
+        # Optional: plug in external alerting here (Telegram/Discord, etc.).
         sys.exit(1)
 
 if __name__ == "__main__":

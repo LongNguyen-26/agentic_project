@@ -51,6 +51,54 @@ copy .env.example .env
 
 Then fill required keys in `.env`.
 
+## Submission Setup & Execution Instructions
+This section is intended for judge-side reproducible setup and execution.
+
+### 1) Prerequisites
+- Python **>= 3.12**
+- `uv` package manager
+
+### 2) Environment Setup
+```bash
+cp .env.example .env
+```
+
+Fill required keys in `.env`:
+- `COMPETITION_BASE_URL`
+- `API_KEY`
+- `OPENAI_API_KEY`
+
+On Windows `cmd`, you can use:
+
+```bash
+copy .env.example .env
+```
+
+### 3) Install Dependencies
+Preferred (locked and reproducible from `uv.lock`):
+
+```bash
+uv sync
+```
+
+Fallback (if `uv` is unavailable):
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+```
+
+### 4) Execute
+```bash
+python main.py
+```
+
+### 5) Run Tests
+```bash
+python -m unittest discover -s tests
+```
+
 ## ⚡ Quick Start
 Run the agent:
 

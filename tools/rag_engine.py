@@ -81,10 +81,10 @@ def _render_documents_for_prompt(documents: List[Document]) -> str:
         file_path = str(doc.metadata.get("file_path", "unknown"))
         summary = str(doc.metadata.get("summary", "")).strip()
         if summary and file_path not in summarized_files:
-            prefix = f"[Nguồn: {file_path} - Tóm tắt: {_short_summary(summary)}]"
+            prefix = f"[Source: {file_path} - Summary: {_short_summary(summary)}]"
             summarized_files.add(file_path)
         else:
-            prefix = f"[Nguồn: {file_path}]"
+            prefix = f"[Source: {file_path}]"
         rendered_chunks.append(f"{prefix}\n{doc.page_content}")
     return "\n\n---\n\n".join(rendered_chunks)
 
@@ -159,9 +159,9 @@ def _rerank_documents(query: str, documents: List[Document]) -> List[Document]:
 
 def build_and_retrieve_context(parsed_documents: List[Dict[str, Any]], query: str, top_k: int = 5) -> str:
     """
-    Hàm chính được gọi bởi Node RAG.
-    Chia nhỏ văn bản của từng file, gắn metadata (tên file, tóm tắt) vào mỗi chunk,
-    sau đó tìm top K chunks liên quan nhất với query bằng Hybrid Search.
+    Main entry point used by the RAG node.
+    Split file text into chunks, attach metadata (file path, summary) per chunk,
+    then retrieve top-k most relevant chunks with hybrid search.
     """
     if not parsed_documents:
         return ""
@@ -173,12 +173,12 @@ def build_and_retrieve_context(parsed_documents: List[Dict[str, Any]], query: st
 
     retrieval_k = _resolve_retrieval_k(top_k)
 
-    # 1. Khởi tạo Retriever tìm kiếm từ khóa (BM25)
+    # 1) Build keyword retriever (BM25).
     logger.debug("[rag] Building BM25 retriever")
     bm25_retriever = BM25Retriever.from_documents(chunk_documents)
     bm25_retriever.k = retrieval_k
 
-    # Nếu không có API Key cho Embeddings, chỉ sử dụng BM25
+    # If embeddings are unavailable, run BM25-only retrieval.
     if not embeddings:
         logger.warning("[rag] Missing OpenAI key for embeddings; using ONLY BM25 lexical search")
         try:
@@ -192,20 +192,20 @@ def build_and_retrieve_context(parsed_documents: List[Dict[str, Any]], query: st
             logger.error("[rag] BM25 retrieval failed: %s", e, exc_info=True)
             return ""
 
-    # 2. Khởi tạo Retriever tìm kiếm ngữ nghĩa (FAISS Vector Search)
+    # 2) Build semantic retriever (FAISS vector search).
     try:
         logger.debug("[rag] Building FAISS index with OpenAI embeddings")
         vectorstore = FAISS.from_documents(chunk_documents, embeddings)
         faiss_retriever = vectorstore.as_retriever(search_kwargs={"k": retrieval_k})
         
-        # 3. Kết hợp bằng EnsembleRetriever (Hybrid Search)
+        # 3) Combine BM25 and FAISS via EnsembleRetriever (hybrid search).
         logger.debug("[rag] Executing Hybrid Search (BM25 + FAISS)")
         ensemble_retriever = EnsembleRetriever(
             retrievers=[bm25_retriever, faiss_retriever],
-            weights=[0.5, 0.5] # Cân bằng 50% từ khóa - 50% ngữ nghĩa
+            weights=[0.5, 0.5],  # Balanced lexical and semantic weighting.
         )
         
-        # Invoke sẽ tự động gọi cả 2 retriever, lấy kết quả và tính điểm chéo (RRF)
+        # invoke() executes both retrievers and fuses results (RRF-style ranking).
         docs = ensemble_retriever.invoke(query)
 
         candidate_docs = docs[:retrieval_k]
@@ -224,7 +224,7 @@ def build_and_retrieve_context(parsed_documents: List[Dict[str, Any]], query: st
         
     except Exception as e:
         logger.error("[rag] Hybrid retrieval failed; falling back to BM25 ONLY: %s", e, exc_info=True)
-        # Fallback an toàn: Nếu FAISS hoặc Ensemble lỗi, vẫn cố gắng trả về kết quả từ BM25
+        # Safe fallback: if FAISS/ensemble fails, still attempt BM25 output.
         try:
             docs = bm25_retriever.invoke(query)
             candidate_docs = docs[:retrieval_k]

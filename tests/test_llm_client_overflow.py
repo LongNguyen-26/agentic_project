@@ -45,6 +45,7 @@ class ContextOverflowRetryTests(unittest.TestCase):
                     {"role": "user", "content": "latest user"},
                 ],
                 max_completion_tokens=256,
+                retry_max_output_tokens=1024,
                 temperature=0.1,
             )
 

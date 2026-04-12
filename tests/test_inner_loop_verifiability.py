@@ -47,13 +47,19 @@ class FolderVerifiabilityTests(unittest.TestCase):
             "task_type": "folder-organisation",
             "draft_answer": {
                 "answers": ["fileA -> folder1"],
-                "thought_log": f"Folder: {valid_folder}",
+                "thought_log": (
+                    "Sorting Details:\n"
+                    "- File: Public/a.pdf\n"
+                    f"  Folder: {valid_folder}\n"
+                    "  Reasoning: matched by summary"
+                ),
                 "confidence": confidence,
             },
             "confidence_score": confidence,
             "attempts": 1,
             "retrieved_context": "",
             "prompt_template": "",
+            "parsed_documents": [{"file_path": "Public/a.pdf", "summary": "", "text": ""}],
         }
 
         with mock.patch.object(inner_loop, "_get_llm_service", return_value=fake_llm):

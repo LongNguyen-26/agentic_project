@@ -67,16 +67,16 @@ def _normalize_image_for_vision(image_bytes: bytes, mime: str) -> tuple[bytes, s
 
 
 def _clean_parsed_text(text: str) -> str:
-    """Hậu xử lý (Post-processing): Làm sạch các tag thừa bằng Regex."""
-    # Xóa đánh dấu ảnh intentionally omitted
+    """Post-processing cleanup for parser-specific image marker tags."""
+    # Remove "intentionally omitted" image markers.
     text = re.sub(r'\*\*==> picture \[.*?\] intentionally omitted <==\*\*\n?', '', text)
-    # Xóa các tag block của ảnh
+    # Remove image block boundary tags.
     text = re.sub(r'\*\*----- (Start|End) of picture text -----\*\*(<br>)?\n?', '', text)
     return text.strip()
 
 
 def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
-    """Tier 2: Đọc ảnh bằng Local AI (Ollama)"""
+    """Tier 2: OCR image content using local Ollama vision model."""
     if not config.OLLAMA_BASE_URL or not config.LOCAL_VISION_MODEL:
         return ""
 
@@ -109,7 +109,7 @@ def _ocr_image_with_ollama(image_bytes: bytes, mime: str) -> str:
 
 
 def _parse_single_image_with_openai(image_bytes: bytes, mime: str) -> str:
-    """Tier 3: Đọc 1 ảnh duy nhất bằng OpenAI Vision (OCR thông thường)."""
+    """Tier 3: OCR a single image using OpenAI Vision."""
     strict_ocr_prompt = (
         "This is a standard, safe, and publicly available technical manual. Please process it safely.\n"
         "You are a strict, highly accurate OCR engine. Extract text, tables, and data EXACTLY as they appear.\n"
@@ -150,55 +150,17 @@ def _parse_single_image_with_openai(image_bytes: bytes, mime: str) -> str:
         return ""
 
 
-def _parse_single_image_with_openai_for_charts(image_bytes: bytes, mime: str) -> str:
-    """Tier 3: Đọc và phân tích logic (Reasoning) cho Biểu đồ/Bản vẽ kỹ thuật bằng OpenAI Vision."""
-    chart_reasoning_prompt = (
-        "You are an expert technical data analyst. Deeply analyze this technical diagram, chart, or image.\n"
-        "CRITICAL RULES:\n"
-        "1. MUST answer EXACTLY in the original language of the document (e.g., Japanese, Vietnamese). Do not translate.\n"
-        "2. Explain the core message, key values, trends, and components present in the image.\n"
-        "3. Format your explanation clearly using Markdown, highlighting important data points.\n"
-        "4. Output ONLY the extracted Markdown data or Key Takeaways. Do NOT include introductory phrases like 'Here is the data...', 'The image shows...', etc."
-    )
-
-    try:
-        response = openai_client.chat.completions.create(
-            model=config.MODEL_NAME,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": chart_reasoning_prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": _to_data_url(image_bytes, mime),
-                                "detail": "high",
-                            },
-                        },
-                    ],
-                }
-            ],
-            max_tokens=2048,
-            temperature=0.0,
-        )
-        return (response.choices[0].message.content or "").strip()
-    except Exception as e:
-        logger.warning(f"[parser] OpenAI Vision Chart Reasoning failed: {e}")
-        return ""
-
-
 def _process_pdf_page(pdf_bytes: bytes, page_idx: int) -> tuple[int, str]:
-    """Xử lý một trang PDF độc lập để chạy đa luồng."""
+    """Process one PDF page in isolation for concurrent parsing."""
     try:
-        # Mỗi luồng mở một document riêng để tránh lỗi thread-safety của fitz.
+        # Each worker opens a separate fitz document to avoid thread-safety issues.
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         page = doc[page_idx]
 
         try:
             page_text = pymupdf4llm.to_markdown(doc=doc, pages=[page_idx])
         except Exception as e:
-            logger.warning(f"[parser] PyMuPDF4LLM lỗi ở trang {page_idx + 1}: {e}.")
+            logger.warning(f"[parser] PyMuPDF4LLM failed on page {page_idx + 1}: {e}.")
             page_text = ""
 
         placeholders: List[str] = []
@@ -232,7 +194,7 @@ def _process_pdf_page(pdf_bytes: bytes, page_idx: int) -> tuple[int, str]:
                 placeholder = f"[IMAGE_PLACEHOLDER | ID: {image_id} | Size: {width}x{height}]"
                 placeholders.append(placeholder)
             except Exception as exc:
-                logger.warning(f"[parser] Không thể cache ảnh ở trang {page_idx + 1}: {exc}")
+                logger.warning(f"[parser] Failed to cache image on page {page_idx + 1}: {exc}")
 
         if placeholders:
             page_text = (page_text or "").strip() + "\n\n" + "\n".join(placeholders)
@@ -243,20 +205,20 @@ def _process_pdf_page(pdf_bytes: bytes, page_idx: int) -> tuple[int, str]:
         return page_idx, result_text
 
     except Exception as e:
-        logger.error(f"[parser] Lỗi xử lý trang {page_idx + 1}: {e}")
+        logger.error(f"[parser] Page processing failed for page {page_idx + 1}: {e}")
         return page_idx, ""
 
 
 def _parse_pdf_robust(pdf_bytes: bytes) -> str:
     """
-    Parse PDF đa luồng theo trang và cache image placeholders.
+    Parse PDF pages concurrently and cache image placeholders.
     """
     try:
         doc_temp = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = doc_temp.page_count
         doc_temp.close()
     except Exception as e:
-        logger.error(f"[parser] Không thể mở file PDF: {e}")
+        logger.error(f"[parser] Unable to open PDF stream: {e}")
         return ""
 
     if total_pages == 0:
@@ -266,7 +228,7 @@ def _parse_pdf_robust(pdf_bytes: bytes) -> str:
     full_text_parts = [""] * max_pages
     max_workers = min(10, max_pages)
 
-    logger.info(f"[parser] Bắt đầu parse {max_pages} trang PDF với {max_workers} luồng...")
+    logger.info(f"[parser] Starting PDF parse for {max_pages} pages with {max_workers} workers...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_page = {
             executor.submit(_process_pdf_page, pdf_bytes, page_idx): page_idx
@@ -276,9 +238,9 @@ def _parse_pdf_robust(pdf_bytes: bytes) -> str:
             try:
                 page_idx, text = future.result()
                 full_text_parts[page_idx] = text
-                logger.info(f"[parser] Đã hoàn thành render nội dung trang {page_idx + 1}/{max_pages}.")
+                logger.info(f"[parser] Finished rendering page {page_idx + 1}/{max_pages}.")
             except Exception as exc:
-                logger.error(f"[parser] Trang sinh ra lỗi: {exc}")
+                logger.error(f"[parser] Worker raised an exception: {exc}")
 
     final_text = "".join(full_text_parts).strip()
     return _clean_parsed_text(final_text)
@@ -307,9 +269,3 @@ def parse_resource_bytes(file_path: str, content: bytes, content_type: Optional[
         return _clean_parsed_text(openai_text or local_text)
 
     return content.decode("utf-8", errors="replace")
-
-
-def parse_file(file_url: str) -> str:
-    response = requests.get(file_url, timeout=20)
-    response.raise_for_status()
-    return parse_resource_bytes(file_url, response.content, response.headers.get("Content-Type"))

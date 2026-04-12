@@ -9,26 +9,26 @@ MAX_RETRIES = config.MAX_RETRIES
 MIN_CONFIDENCE = config.VERIFIER_MIN_CONFIDENCE
 
 def route_rag_or_context(state: InnerState) -> str:
-    """Điều hướng sang nhánh RAG hoặc context manager trong inner loop.
+    """Route inner loop to RAG or full-context branch.
 
     Args:
-        state: Trạng thái inner loop chứa cờ use_rag.
+        state: Inner-loop state containing the use_rag decision flag.
 
     Returns:
-        str: "use_rag" khi bật RAG, ngược lại "use_context_manager".
+        str: "use_rag" when RAG is enabled, otherwise "use_context_manager".
     """
     if state.get("use_rag"):
         return "use_rag"
     return "use_context_manager"
 
 def check_verification(state: InnerState) -> str:
-    """Quyết định thoát hay lặp lại vòng self-correction.
+    """Decide whether to stop or continue the self-correction loop.
 
     Args:
-        state: Trạng thái inner loop chứa attempts, is_verified và confidence_score.
+        state: Inner-loop state with attempts, verification status, and confidence.
 
     Returns:
-        str: "pass" nếu đạt điều kiện dừng hoặc quá số lần retry, ngược lại "retry".
+        str: "pass" when stop criteria are met, otherwise "retry".
     """
     if state.get("is_verified") and state.get("confidence_score", 0.0) >= MIN_CONFIDENCE:
         logger.info("[Verifiability] Passed with confidence=%.3f", state.get("confidence_score", 0.0))
@@ -40,7 +40,7 @@ def check_verification(state: InnerState) -> str:
 
     if state["attempts"] >= MAX_RETRIES:
         logger.warning("[Verifiability] Max retries reached; accepting current answer")
-        return "pass" # Thoát vòng lặp
+        return "pass"  # Exit the retry loop.
         
     logger.warning(
         "[Verifiability] Failed confidence=%.3f attempt=%s; retrying",
@@ -54,23 +54,23 @@ def route_after_action(state: InnerState) -> str:
     """Route after action generation based on whether a tool call is needed.
 
     Args:
-        state: Trạng thái inner loop sau action_generation.
+        state: Inner-loop state after action_generation.
 
     Returns:
-        str: "call_vision_tool" nếu có tool_calls, ngược lại "verifiability".
+        str: "call_vision_tool" when tool_calls is non-empty, otherwise "verifiability".
     """
     if state.get("tool_calls"):
         return "call_vision_tool"
     return "verifiability"
 
 def route_outer_loop(state: OuterState) -> str:
-    """Điều hướng vòng lặp ngoài sang xử lý task hoặc kết thúc.
+    """Route the outer loop to task processing or termination.
 
     Args:
-        state: Trạng thái outer loop chứa current_task và should_continue.
+        state: Outer-loop state with current_task and should_continue.
 
     Returns:
-        str: "process_task" khi còn task cần xử lý, ngược lại "end".
+        str: "process_task" when a task is available, otherwise "end".
     """
     if state.get("current_task") is None or not state.get("should_continue", True):
         return "end"

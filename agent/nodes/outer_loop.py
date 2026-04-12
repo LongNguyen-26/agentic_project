@@ -1,4 +1,6 @@
 # agent/nodes/outer_loop.py
+from typing import Any
+
 from agent.state import OuterState
 from agent.prompts.sys_prompts import SYS_CLASSIFY_TASK, SYS_PLANNING_HINTS
 from agent.prompts.user_prompt import build_planning_hints_prompt, build_task_classification_prompt
@@ -26,14 +28,14 @@ def _get_llm_service() -> LLMService:
         llm_service = LLMService()
     return llm_service
 
-def auth_node(state: OuterState) -> dict:
-    """Xác thực phiên làm việc và đồng bộ token vào client.
+def auth_node(state: OuterState) -> dict[str, Any]:
+    """Authenticate the session and sync credentials into the API client.
 
     Args:
-        state: Trạng thái outer loop chứa session_id và access_token hiện tại.
+        state: Outer-loop state that may contain existing session credentials.
 
     Returns:
-        dict: Thông tin session/access token mới hoặc cờ dừng khi xác thực thất bại.
+        dict[str, Any]: Updated credentials or a stop flag when authentication fails.
     """
     logger.info("[auth] Checking authentication state")
     local_client = _get_client()
@@ -45,22 +47,23 @@ def auth_node(state: OuterState) -> dict:
             return {"session_id": local_client.session_id, "access_token": local_client.access_token}
         return {"should_continue": False, "error": "Authentication failed"}
 
-    local_client.session_id = state["session_id"]
-    local_client.access_token = state["access_token"]
+    local_client.session_id = state.get("session_id")
+    local_client.access_token = state.get("access_token")
     return {}
 
-def fetch_task_node(state: OuterState) -> dict:
-    """Lấy task tiếp theo và xác định task_type nếu API chưa cung cấp.
+def fetch_task_node(state: OuterState) -> dict[str, Any]:
+    """Fetch the next task and infer task_type if the API omitted it.
 
     Args:
-        state: Trạng thái outer loop chứa current_task và thông tin điều khiển vòng lặp.
+        state: Outer-loop state with current task and loop-control fields.
 
     Returns:
-        dict: current_task đã chuẩn hóa type và cờ should_continue cho router outer loop.
+        dict[str, Any]: Normalized current_task plus should_continue routing flag.
     """
-    # NẾU TASK CŨ CHƯA NỘP THÀNH CÔNG, BỎ QUA VIỆC FETCH VÀ RETRY TASK HIỆN TẠI
-    if state.get("current_task") is not None:
-        logger.info("[task] Retrying existing task_id=%s", state["current_task"]["id"])
+    # If the previous task was not submitted successfully, retry it instead of fetching.
+    existing_task = state.get("current_task")
+    if existing_task is not None:
+        logger.info("[task] Retrying existing task_id=%s", existing_task.get("id"))
         return {"should_continue": True}
     
     logger.info("[task] Fetching next task")
@@ -70,22 +73,21 @@ def fetch_task_node(state: OuterState) -> dict:
         logger.info("[loop] No tasks returned by server")
         return {"current_task": None, "planning_hints": "", "should_continue": False}
 
-    # BẮT ĐẦU ĐOẠN SỬA: Lấy task_type từ API, nếu không có thì dùng LLM để phân loại
+    # Prefer API-provided task_type; fallback to local rules and then LLM classification.
     task_type = task.get("type")
     prompt_template = task.get("prompt_template", "")
     
-    # === TÍCH HỢP LOGIC PHÂN LOẠI TẠI ĐÂY ===
     if not task_type:
-        # 1. Bước lọc đầu (Rule-based)
+        # Step 1: fast rule-based classification.
         prompt_lower = prompt_template.lower()
         folder_keywords = [
-            "フォルダへ配置", "フォルダに分類", "仕分け", # Tiếng Nhật
-            "folder", "sort", "organize", "organise", "classify" # Tiếng Anh
+            "フォルダへ配置", "フォルダに分類", "仕分け",  # Japanese
+            "folder", "sort", "organize", "organise", "classify",  # English
         ]
-        # Thêm từ khóa cho QA task dựa trên prompt mẫu
+        # QA-oriented keywords used as fast hints.
         qa_keywords = [
-            "特定し", "確認せよ", "取扱説明書", "注意事項", # Tiếng Nhật
-            "question", "answer", "extract", "identify", "confirm" # Tiếng Anh
+            "特定し", "確認せよ", "取扱説明書", "注意事項",  # Japanese
+            "question", "answer", "extract", "identify", "confirm",  # English
         ]
 
         if any(keyword in prompt_lower for keyword in folder_keywords):
@@ -94,30 +96,28 @@ def fetch_task_node(state: OuterState) -> dict:
         elif any(keyword in prompt_lower for keyword in qa_keywords):
             logger.info("[task] Fast classification: 'question-answering' (rule-based matched)")
             task_type = "question-answering"
-        # 2. Fallback sang LLM nếu không khớp luật
+        # Step 2: fallback to LLM when no rule matches.
         else:
             logger.info("[task] Missing task type from API, classifying via LLM...")
             task_type = _get_llm_service().classify_task_type(
                 system_prompt=SYS_CLASSIFY_TASK,
                 user_prompt=build_task_classification_prompt(prompt_template),
             )
-    # ========================================
-    # KẾT THÚC ĐOẠN SỬA
     
-    # ---> THÊM DÒNG LOG NÀY <---
+    # Keep prompt preview short to avoid noisy logs.
     short_prompt = (prompt_template[:100] + "...") if len(prompt_template) > 100 else prompt_template
     logger.info("[task] Received task_id=%s, task_type=%s, prompt='%s'", task.get("id"), task_type, short_prompt)
     return {"current_task": {**task, "type": task_type}, "should_continue": True}
 
 
-def planning_node(state: OuterState) -> dict:
-    """Trích xuất planning hints từ đề bài trước khi gọi inner graph.
+def planning_node(state: OuterState) -> dict[str, Any]:
+    """Extract planning hints from prompt instructions before inner execution.
 
     Args:
-        state: Trạng thái outer loop chứa current_task và prompt_template.
+        state: Outer-loop state carrying the current task prompt.
 
     Returns:
-        dict: planning_hints để tăng độ chính xác cho action generation.
+        dict[str, Any]: planning_hints for downstream action generation.
     """
     task = state.get("current_task")
     if not task:
@@ -134,16 +134,21 @@ def planning_node(state: OuterState) -> dict:
     )
     return {"planning_hints": hints}
 
-def submit_node(state: OuterState) -> dict:
-    """Nộp kết quả task lên server và quyết định có xóa state hay không.
+def submit_node(state: OuterState) -> dict[str, Any]:
+    """Submit task result and clear state only after successful submission.
 
     Args:
-        state: Trạng thái outer loop chứa current_task và task_result hiện tại.
+        state: Outer-loop state with current task and produced task result.
 
     Returns:
-        dict: State cập nhật sau submit; chỉ clear task khi submit thành công.
+        dict[str, Any]: Updated state payload after submit attempt.
     """
-    task_id = state["current_task"]["id"]
+    task = state.get("current_task")
+    if not task:
+        logger.warning("[submit] Missing current_task; skip submit")
+        return {}
+
+    task_id = task.get("id")
     result = state.get("task_result")
 
     if result is None:
@@ -155,9 +160,9 @@ def submit_node(state: OuterState) -> dict:
 
     if success:
         logger.info("[submit] Submit success for task_id=%s", task_id)
-        # CHỈ XÓA STATE KHI THÀNH CÔNG
+        # Only clear task state after a successful submission.
         return {"current_task": None, "planning_hints": "", "task_result": None}
-    else:
-        logger.warning("[submit] Submit failed for task_id=%s, keeping task in state to retry", task_id)
-        # NẾU LỖI, GIỮ NGUYÊN STATE ĐỂ RETRY
-        return {}
+
+    logger.warning("[submit] Submit failed for task_id=%s, keeping task in state to retry", task_id)
+    # Keep current state unchanged so the task can be retried.
+    return {}

@@ -10,13 +10,13 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Mặc định lưu vào thư mục data/sessions/
+# Default checkpoint location under storage root.
 DEFAULT_CHECKPOINT_DIR = os.path.join(os.getcwd(), config.STORAGE_ROOT)
 DEFAULT_CHECKPOINT_FILE = os.path.join(DEFAULT_CHECKPOINT_DIR, "session_checkpoint.json")
 PARSED_CACHE_DIR = os.path.join(DEFAULT_CHECKPOINT_DIR, "parsed_cache")
 
-def _ensure_dir_exists(filepath: str):
-    """Đảm bảo thư mục tồn tại trước khi ghi file."""
+def _ensure_dir_exists(filepath: str) -> None:
+    """Ensure destination directory exists before writing a file."""
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
 
@@ -39,7 +39,7 @@ def save_checkpoint(
     filepath: str = DEFAULT_CHECKPOINT_FILE,
     extra: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Lưu session_id và token xuống file JSON."""
+    """Persist session_id and access_token into checkpoint JSON."""
     _ensure_dir_exists(filepath)
     try:
         data: Dict[str, Any] = _load_raw_checkpoint(filepath)
@@ -56,7 +56,7 @@ def save_checkpoint(
         return False
 
 def load_checkpoint(filepath: str = DEFAULT_CHECKPOINT_FILE) -> Tuple[Optional[str], Optional[str]]:
-    """Đọc session_id và token từ file JSON."""
+    """Load session_id and access_token from checkpoint JSON."""
     data = _load_raw_checkpoint(filepath)
     if not data:
         logger.debug("[checkpoint] No existing checkpoint at %s", filepath)
@@ -77,8 +77,8 @@ def load_checkpoint(filepath: str = DEFAULT_CHECKPOINT_FILE) -> Tuple[Optional[s
         logger.warning("[checkpoint] Failed to read checkpoint: %s", e, exc_info=True)
         return None, None
 
-def clear_checkpoint(filepath: str = DEFAULT_CHECKPOINT_FILE):
-    """Xóa file checkpoint khi session hết hạn hoặc kết thúc cuộc thi."""
+def clear_checkpoint(filepath: str = DEFAULT_CHECKPOINT_FILE) -> None:
+    """Delete checkpoint file when session expires or should be reset."""
     if os.path.exists(filepath):
         try:
             os.remove(filepath)

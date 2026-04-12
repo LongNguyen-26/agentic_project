@@ -43,6 +43,13 @@ class QAActionSchema(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reasoning: str = Field(default="")
 
+    @property
+    def requires_vision_tool(self) -> bool:
+        """Return True when image analysis is requested with at least one valid image id."""
+        if not self.needs_image_analysis:
+            return False
+        return any(image_id.strip() for image_id in self.target_image_ids)
+
 
 class ActionPlanResponse(BaseModel):
     answers: List[str] = Field(default_factory=list)
