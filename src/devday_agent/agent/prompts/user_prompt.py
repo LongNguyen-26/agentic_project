@@ -1,6 +1,6 @@
 # prompts/user_prompt.py
 from typing import Any, Dict
-from agent.prompts.sys_prompts import VALID_FOLDERS_STR
+from devday_agent.agent.prompts.sys_prompts import VALID_FOLDERS_STR
 
 
 def build_qa_action_prompt(

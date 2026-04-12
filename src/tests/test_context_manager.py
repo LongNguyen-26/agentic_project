@@ -1,8 +1,8 @@
 import unittest
 from unittest import mock
 
-from models.llm_schemas import FileSummaryResponse
-from tools import context_manager as cm
+from devday_agent.models.llm_schemas import FileSummaryResponse
+from devday_agent.tools import context_manager as cm
 
 
 class _FakeLLMService:

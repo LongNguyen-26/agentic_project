@@ -5,7 +5,7 @@ import os
 from typing import Any, Dict, Optional, Tuple
 
 from config import config
-from core.logger import get_logger
+from devday_agent.core.logger import get_logger
 
 
 logger = get_logger(__name__)

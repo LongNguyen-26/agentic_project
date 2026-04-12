@@ -1,6 +1,6 @@
 import unittest
 
-from agent.nodes import inner_loop
+from devday_agent.agent.nodes import inner_loop
 
 
 class QAGroundingGuardTests(unittest.TestCase):

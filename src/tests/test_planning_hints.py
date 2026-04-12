@@ -1,8 +1,8 @@
 import unittest
 from unittest import mock
 
-from agent.nodes import outer_loop
-from agent.prompts.user_prompt import build_qa_action_prompt, build_sort_action_prompt
+from devday_agent.agent.nodes import outer_loop
+from devday_agent.agent.prompts.user_prompt import build_qa_action_prompt, build_sort_action_prompt
 
 
 class PlanningHintsTests(unittest.TestCase):

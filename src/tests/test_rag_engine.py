@@ -3,7 +3,7 @@ from unittest import mock
 
 from langchain_core.documents import Document
 
-from tools import rag_engine
+from devday_agent.tools import rag_engine
 
 
 class _FakeBM25Retriever:

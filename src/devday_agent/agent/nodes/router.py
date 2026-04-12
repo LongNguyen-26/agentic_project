@@ -1,7 +1,7 @@
 # agent/nodes/router.py
-from agent.state import InnerState, OuterState
+from devday_agent.agent.state import InnerState, OuterState
 from config import config
-from core.logger import get_logger
+from devday_agent.core.logger import get_logger
 
 logger = get_logger(__name__)
 

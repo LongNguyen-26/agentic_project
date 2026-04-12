@@ -4,7 +4,7 @@ from unittest import mock
 from instructor.core.exceptions import InstructorRetryException
 from pydantic import BaseModel
 
-from clients.llm_client import LLMService
+from devday_agent.clients.llm_client import LLMService
 
 
 class _DummyResponse(BaseModel):

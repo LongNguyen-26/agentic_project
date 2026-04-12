@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
 
-from agent.nodes import inner_loop, router
+from devday_agent.agent.nodes import inner_loop, router
 
 
 class ForcedVisionKeywordTests(unittest.TestCase):

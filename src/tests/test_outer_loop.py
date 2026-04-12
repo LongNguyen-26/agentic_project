@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
-from agent.nodes import outer_loop
-from agent.state import OuterState
+from devday_agent.agent.nodes import outer_loop
+from devday_agent.agent.state import OuterState
 
 class OuterLoopResilienceTests(unittest.TestCase):
     def test_submit_failure_retains_state_for_retry(self):

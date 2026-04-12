@@ -3,26 +3,26 @@ import re
 from typing import Any, Dict, List, Set
 from collections import Counter
 
-from agent.prompts.sys_prompts import (
+from devday_agent.agent.prompts.sys_prompts import (
     SYS_ACTION_QA,
     SYS_ACTION_SORT,
     SYS_VERIFY_QA,
     SYS_VERIFY_SORT,
     VALID_FOLDERS_STR,
 )
-from agent.prompts.user_prompt import (
+from devday_agent.agent.prompts.user_prompt import (
     build_qa_action_prompt,
     build_qa_verification_prompt,
     build_sort_action_prompt,
     build_sort_verification_prompt,
 )
-from agent.state import InnerState
-from clients.competition_client import APIClient
-from clients.llm_client import LLMService
+from devday_agent.agent.state import InnerState
+from devday_agent.clients.competition_client import APIClient
+from devday_agent.clients.llm_client import LLMService
 from config import config
-from core.logger import get_logger
-from core.checkpoint import load_parsed_text_cache, save_parsed_text_cache
-from models.llm_schemas import QAActionSchema, SortActionResponse, VerificationResponse
+from devday_agent.core.logger import get_logger
+from devday_agent.core.checkpoint import load_parsed_text_cache, save_parsed_text_cache
+from devday_agent.models.llm_schemas import QAActionSchema, SortActionResponse, VerificationResponse
 from tools.context_manager import format_context_from_documents, format_full_context, get_or_create_file_summary
 from tools.document_parser import parse_resource_bytes
 from tools.rag_engine import build_and_retrieve_context

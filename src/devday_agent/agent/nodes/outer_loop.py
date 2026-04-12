@@ -1,13 +1,13 @@
 # agent/nodes/outer_loop.py
 from typing import Any
 
-from agent.state import OuterState
-from agent.prompts.sys_prompts import SYS_CLASSIFY_TASK, SYS_PLANNING_HINTS
-from agent.prompts.user_prompt import build_planning_hints_prompt, build_task_classification_prompt
-from clients.competition_client import APIClient
-from clients.llm_client import LLMService
-from core.checkpoint import _persist_session_checkpoint
-from core.logger import get_logger
+from devday_agent.agent.state import OuterState
+from devday_agent.agent.prompts.sys_prompts import SYS_CLASSIFY_TASK, SYS_PLANNING_HINTS
+from devday_agent.agent.prompts.user_prompt import build_planning_hints_prompt, build_task_classification_prompt
+from devday_agent.clients.competition_client import APIClient
+from devday_agent.clients.llm_client import LLMService
+from devday_agent.core.checkpoint import _persist_session_checkpoint
+from devday_agent.core.logger import get_logger
 
 client = None
 llm_service = None

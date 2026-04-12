@@ -10,8 +10,8 @@ from openai import APIError, APITimeoutError, BadRequestError, OpenAI, RateLimit
 from pydantic import BaseModel, ValidationError
 
 from config import config
-from core.logger import get_logger
-from models.llm_schemas import (
+from devday_agent.core.logger import get_logger
+from devday_agent.models.llm_schemas import (
     PlanningHintsResponse,
     TaskClassification,
 )

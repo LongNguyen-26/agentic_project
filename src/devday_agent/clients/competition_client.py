@@ -8,8 +8,8 @@ from typing import Optional, Dict, Any, List
 import httpx
 
 from config import config
-from models.api_schemas import SessionResponse, SubmissionResponse, TaskResponse
-from core.logger import get_logger
+from devday_agent.models.api_schemas import SessionResponse, SubmissionResponse, TaskResponse
+from devday_agent.core.logger import get_logger
 
 
 logger = get_logger(__name__)

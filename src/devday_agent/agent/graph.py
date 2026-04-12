@@ -52,10 +52,10 @@ from typing import Any
 
 from langgraph.graph import StateGraph, END
 
-from core.logger import get_logger
+from devday_agent.core.logger import get_logger
 from .state import InnerState, OuterState
 
-# Import node implementations from agent/nodes.
+# Import node implementations from devday_agent.agent/nodes.
 from .nodes.inner_loop import (
     observability_node, 
     setup_rag_node, 

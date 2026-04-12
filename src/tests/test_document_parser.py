@@ -1,7 +1,7 @@
 import unittest
 from unittest import mock
 
-from tools import document_parser as parser
+from devday_agent.tools import document_parser as parser
 
 
 class TieredParserTests(unittest.TestCase):

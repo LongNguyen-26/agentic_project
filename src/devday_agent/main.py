@@ -3,8 +3,8 @@ import sys
 import time
 from typing import Any
 
-from core.logger import get_logger, setup_logging
-from core.checkpoint import load_checkpoint
+from devday_agent.core.logger import get_logger, setup_logging
+from devday_agent.core.checkpoint import load_checkpoint
 
 
 logger = get_logger(__name__)
@@ -44,7 +44,7 @@ def _extract_important_updates(state_update: dict) -> dict:
 def main() -> None:
     setup_logging()
     logger.info("[agent] Starting VPP AI Agent runtime")
-    from agent.graph import agent_app  # Import after logging bootstrap.
+    from devday_agent.agent.graph import agent_app  # Import after logging bootstrap.
     
     # 1. Restore session checkpoint from disk when available.
     session_id, access_token = load_checkpoint()

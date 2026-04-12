@@ -11,7 +11,7 @@ import pymupdf4llm
 from openai import OpenAI
 
 from config import config
-from core.logger import get_logger
+from devday_agent.core.logger import get_logger
 
 openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
 logger = get_logger(__name__)
