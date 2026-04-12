@@ -68,11 +68,21 @@ def _build_chunk_documents(parsed_documents: List[Dict[str, Any]]) -> List[Docum
 
 def _render_documents_for_prompt(documents: List[Document]) -> str:
     rendered_chunks: List[str] = []
+    summarized_files = set()
+
+    def _short_summary(raw_summary: str) -> str:
+        limit = max(int(config.RAG_SUMMARY_MAX_CHARS), 80)
+        summary = raw_summary.strip()
+        if len(summary) <= limit:
+            return summary
+        return f"{summary[:limit]}..."
+
     for doc in documents:
         file_path = str(doc.metadata.get("file_path", "unknown"))
         summary = str(doc.metadata.get("summary", "")).strip()
-        if summary:
-            prefix = f"[Nguồn: {file_path} - Tóm tắt: {summary}]"
+        if summary and file_path not in summarized_files:
+            prefix = f"[Nguồn: {file_path} - Tóm tắt: {_short_summary(summary)}]"
+            summarized_files.add(file_path)
         else:
             prefix = f"[Nguồn: {file_path}]"
         rendered_chunks.append(f"{prefix}\n{doc.page_content}")

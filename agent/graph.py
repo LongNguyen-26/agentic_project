@@ -162,6 +162,7 @@ def process_task_node(state: OuterState) -> dict:
         "answer_log": "",
         "used_tools": [],
         "attempts": 0,
+        "fallback_due_to_grounding": False,
         "is_verified": False,
     }
 

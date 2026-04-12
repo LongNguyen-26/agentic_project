@@ -1,6 +1,6 @@
 # agent/nodes/inner_loop.py
 import re
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Set
 from collections import Counter
 
 from agent.prompts.sys_prompts import (
@@ -171,6 +171,43 @@ def _append_answer_log(state: InnerState, answers: List[str], confidence: float,
     return merged[-max_chars:]
 
 
+def _build_grounding_fallback_answer(
+    draft_answer: Dict[str, Any],
+    grounded_count: int,
+    detected_count: int,
+    required_count: int,
+) -> Dict[str, Any]:
+    tentative_answers = draft_answer.get("answers", [])
+    tentative = ""
+    if tentative_answers:
+        tentative = str(tentative_answers[0]).strip()
+
+    if tentative:
+        conservative_answer = (
+            f"[Low-confidence / grounding failed] Tentative answer: {tentative}\n"
+            f"Grounding markers found {grounded_count}/{detected_count}; required >= {required_count}."
+        )
+    else:
+        conservative_answer = (
+            "Unable to provide a grounded final answer from retrieved context. "
+            f"Grounding markers found {grounded_count}/{detected_count}; required >= {required_count}."
+        )
+
+    prior_thought = str(draft_answer.get("thought_log", "")).strip()
+    fallback_note = (
+        "[Fallback] Exhausted retries with grounding failure. "
+        "Submitting conservative low-confidence answer to avoid ungrounded claims."
+    )
+    fallback_thought = f"{prior_thought}\n\n{fallback_note}" if prior_thought else fallback_note
+
+    return {
+        "answers": [conservative_answer],
+        "thought_log": fallback_thought,
+        "used_tools": draft_answer.get("used_tools", []),
+        "confidence": float(draft_answer.get("confidence", 0.0) or 0.0),
+    }
+
+
 def _get_llm_service() -> LLMService:
     global llm_service
     if llm_service is None:
@@ -197,6 +234,11 @@ def _generate_sort_action(state: InnerState, feedback: str) -> dict:
         system_prompt=SYS_ACTION_SORT,
         user_prompt=prompt,
         response_model=SortActionResponse,
+        max_completion_tokens=config.SORT_ACTION_MAX_OUTPUT_TOKENS,
+        retry_max_output_tokens=max(
+            config.SORT_ACTION_RETRY_MAX_OUTPUT_TOKENS,
+            config.SORT_ACTION_MAX_OUTPUT_TOKENS,
+        ),
     )
 
     formatted_thought_log = (draft_response.overall_thought_log or "").strip()
@@ -274,6 +316,11 @@ def _generate_qa_action(state: InnerState, feedback: str) -> dict:
         system_prompt=SYS_ACTION_QA,
         user_prompt=prompt,
         response_model=QAActionSchema,
+        max_completion_tokens=config.QA_ACTION_MAX_OUTPUT_TOKENS,
+        retry_max_output_tokens=max(
+            config.QA_ACTION_RETRY_MAX_OUTPUT_TOKENS,
+            config.QA_ACTION_MAX_OUTPUT_TOKENS,
+        ),
     )
 
     if draft_response.needs_image_analysis:
@@ -319,6 +366,11 @@ def _verify_sort(state: InnerState) -> dict:
         system_prompt=SYS_VERIFY_SORT,
         user_prompt=prompt,
         response_model=VerificationResponse,
+        max_completion_tokens=config.SORT_VERIFICATION_MAX_OUTPUT_TOKENS,
+        retry_max_output_tokens=max(
+            config.SORT_VERIFICATION_RETRY_MAX_OUTPUT_TOKENS,
+            config.SORT_VERIFICATION_MAX_OUTPUT_TOKENS,
+        ),
     )
 
     confidence = float(verification.confidence)
@@ -420,6 +472,11 @@ def _verify_qa(state: InnerState) -> dict:
         system_prompt=SYS_VERIFY_QA,
         user_prompt=prompt,
         response_model=VerificationResponse,
+        max_completion_tokens=config.QA_VERIFICATION_MAX_OUTPUT_TOKENS,
+        retry_max_output_tokens=max(
+            config.QA_VERIFICATION_RETRY_MAX_OUTPUT_TOKENS,
+            config.QA_VERIFICATION_MAX_OUTPUT_TOKENS,
+        ),
     )
 
     changed = verification.changed
@@ -437,8 +494,8 @@ def _verify_qa(state: InnerState) -> dict:
     grounded_count, detected_count = _count_grounded_markers(output_text, context)
     grounding_pass = True
     grounding_feedback = ""
+    required = max(int(config.QA_GROUNDING_MIN_EVIDENCE_MARKERS), 0)
     if bool(config.QA_GROUNDING_ENFORCED):
-        required = max(int(config.QA_GROUNDING_MIN_EVIDENCE_MARKERS), 0)
         if detected_count == 0 or grounded_count < required:
             grounding_pass = False
             grounding_feedback = (
@@ -458,13 +515,24 @@ def _verify_qa(state: InnerState) -> dict:
     if grounding_feedback:
         combined_feedback = f"{combined_feedback}\n\n[Grounding]: {grounding_feedback}".strip()
 
+    next_attempt = state["attempts"] + 1
+    fallback_due_to_grounding = False
+    if bool(config.QA_GROUNDING_ENFORCED) and not grounding_pass and next_attempt >= max(int(config.MAX_RETRIES), 1):
+        next_answer = _build_grounding_fallback_answer(next_answer, grounded_count, detected_count, required)
+        fallback_due_to_grounding = True
+        combined_feedback = (
+            f"{combined_feedback}\n\n"
+            "[Fallback]: Max retries reached with grounding failure; switched to conservative low-confidence answer."
+        ).strip()
+
     return {
         "draft_answer": next_answer,
         "confidence_score": confidence,
         "is_verified": confidence >= config.VERIFIER_MIN_CONFIDENCE and grounding_pass,
         "verification_feedback": combined_feedback,
         "answer_log": answer_log,
-        "attempts": state["attempts"] + 1,
+        "attempts": next_attempt,
+        "fallback_due_to_grounding": fallback_due_to_grounding,
     }
 
 def observability_node(state: InnerState) -> dict:

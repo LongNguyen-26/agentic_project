@@ -36,6 +36,7 @@ class LLMService:
         response_model: Type[BaseModel],
         messages: List[Dict[str, str]],
         max_completion_tokens: int,
+        retry_max_output_tokens: Optional[int],
         temperature: float,
         reasoning_effort: Optional[str] = None,
     ) -> BaseModel:
@@ -48,7 +49,8 @@ class LLMService:
         current_messages = deepcopy(messages)
 
         def _next_retry_tokens(current_tokens: int) -> int:
-            retry_cap = max(int(config.LLM_RETRY_MAX_OUTPUT_TOKENS), current_tokens)
+            retry_cap_source = retry_max_output_tokens or config.LLM_RETRY_MAX_OUTPUT_TOKENS
+            retry_cap = max(int(retry_cap_source), current_tokens)
             proposed = int(max(current_tokens + 256, current_tokens * retry_token_growth))
             return min(proposed, retry_cap)
 
@@ -279,7 +281,11 @@ class LLMService:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS, 256),
+                max_completion_tokens=max(config.TASK_CLASSIFICATION_MAX_OUTPUT_TOKENS, 128),
+                retry_max_output_tokens=max(
+                    config.TASK_CLASSIFICATION_RETRY_MAX_OUTPUT_TOKENS,
+                    config.TASK_CLASSIFICATION_MAX_OUTPUT_TOKENS,
+                ),
                 temperature=0.0,
             )
             return response.task_type
@@ -301,7 +307,11 @@ class LLMService:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS * 4, 256),
+                max_completion_tokens=max(config.PLANNING_HINTS_MAX_OUTPUT_TOKENS, 256),
+                retry_max_output_tokens=max(
+                    config.PLANNING_HINTS_RETRY_MAX_OUTPUT_TOKENS,
+                    config.PLANNING_HINTS_MAX_OUTPUT_TOKENS,
+                ),
                 temperature=0.2,
                 reasoning_effort="high",
             )
@@ -326,6 +336,7 @@ class LLMService:
         user_prompt: str,
         response_model: Type[BaseModel],
         max_completion_tokens: Optional[int] = None,
+        retry_max_output_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
     ) -> BaseModel:
         """Standardized action generation wrapper around structured LLM output."""
@@ -334,6 +345,7 @@ class LLMService:
             user_prompt=user_prompt,
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
+            retry_max_output_tokens=retry_max_output_tokens,
             reasoning_effort=reasoning_effort,
         )
 
@@ -344,6 +356,7 @@ class LLMService:
         user_prompt: str,
         response_model: Type[BaseModel],
         max_completion_tokens: Optional[int] = None,
+        retry_max_output_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
     ) -> BaseModel:
         """Standardized verification generation wrapper around structured LLM output."""
@@ -352,6 +365,7 @@ class LLMService:
             user_prompt=user_prompt,
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
+            retry_max_output_tokens=retry_max_output_tokens,
             reasoning_effort=reasoning_effort,
         )
 
@@ -362,6 +376,7 @@ class LLMService:
         user_prompt: str,
         response_model: Type[BaseModel],
         max_completion_tokens: Optional[int] = None,
+        retry_max_output_tokens: Optional[int] = None,
         reasoning_effort: Optional[str] = None,
     ) -> BaseModel:
         """Generic typed structured output call for node-level usage."""
@@ -372,6 +387,7 @@ class LLMService:
                 {"role": "user", "content": user_prompt},
             ],
             max_completion_tokens=max_completion_tokens or config.LLM_MAX_OUTPUT_TOKENS,
+            retry_max_output_tokens=retry_max_output_tokens,
             temperature=config.TEMPERATURE,
             reasoning_effort=reasoning_effort,
         )

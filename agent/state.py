@@ -27,6 +27,7 @@ class InnerState(TypedDict):
     verification_feedback: str
     answer_log: str
     attempts: int
+    fallback_due_to_grounding: bool
     used_tools: List[str]
 
 class OuterState(TypedDict):

@@ -30,13 +30,17 @@ def check_verification(state: InnerState) -> str:
     Returns:
         str: "pass" nếu đạt điều kiện dừng hoặc quá số lần retry, ngược lại "retry".
     """
-    if state["attempts"] >= MAX_RETRIES:
-        logger.warning("[Verifiability] Max retries reached; accepting current answer")
-        return "pass" # Thoát vòng lặp
-        
     if state.get("is_verified") and state.get("confidence_score", 0.0) >= MIN_CONFIDENCE:
         logger.info("[Verifiability] Passed with confidence=%.3f", state.get("confidence_score", 0.0))
         return "pass"
+
+    if state.get("fallback_due_to_grounding"):
+        logger.warning("[Verifiability] Grounding fallback activated; submitting conservative answer")
+        return "pass"
+
+    if state["attempts"] >= MAX_RETRIES:
+        logger.warning("[Verifiability] Max retries reached; accepting current answer")
+        return "pass" # Thoát vòng lặp
         
     logger.warning(
         "[Verifiability] Failed confidence=%.3f attempt=%s; retrying",

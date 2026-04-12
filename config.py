@@ -58,16 +58,36 @@ class Settings:
 	LLM_RETRY_BASE_DELAY: float = float(os.getenv("LLM_RETRY_BASE_DELAY", "1.0"))
 	LLM_RETRY_JITTER: float = float(os.getenv("LLM_RETRY_JITTER", "0.2"))
 
+	# Stage-specific token budgets to avoid under-provisioning planning/summary calls.
+	TASK_CLASSIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("TASK_CLASSIFICATION_MAX_OUTPUT_TOKENS", "256"))
+	TASK_CLASSIFICATION_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("TASK_CLASSIFICATION_RETRY_MAX_OUTPUT_TOKENS", "1024"))
+	PLANNING_HINTS_MAX_OUTPUT_TOKENS: int = int(os.getenv("PLANNING_HINTS_MAX_OUTPUT_TOKENS", "896"))
+	PLANNING_HINTS_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("PLANNING_HINTS_RETRY_MAX_OUTPUT_TOKENS", "2400"))
+
 	CLASSIFICATION_MAX_TOKENS: int = int(os.getenv("CLASSIFICATION_MAX_TOKENS", "64"))
 	LLM_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))
 	VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("VERIFICATION_MAX_OUTPUT_TOKENS", "1200"))
+	QA_ACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("QA_ACTION_MAX_OUTPUT_TOKENS", os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200")))
+	QA_VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("QA_VERIFICATION_MAX_OUTPUT_TOKENS", os.getenv("VERIFICATION_MAX_OUTPUT_TOKENS", "1200")))
+	QA_ACTION_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("QA_ACTION_RETRY_MAX_OUTPUT_TOKENS", "4800"))
+	QA_VERIFICATION_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("QA_VERIFICATION_RETRY_MAX_OUTPUT_TOKENS", "3600"))
 
-	# Sort tasks usually carry many file summaries; keep a high configurable budget.
-	SORT_ACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_ACTION_MAX_OUTPUT_TOKENS", "36000"))
-	SORT_VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_VERIFICATION_MAX_OUTPUT_TOKENS", "36000"))
+	# Sort tasks usually carry many file summaries; keep a high but bounded budget.
+	SORT_ACTION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_ACTION_MAX_OUTPUT_TOKENS", "12000"))
+	SORT_VERIFICATION_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_VERIFICATION_MAX_OUTPUT_TOKENS", "8000"))
+	SORT_ACTION_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_ACTION_RETRY_MAX_OUTPUT_TOKENS", "14000"))
+	SORT_VERIFICATION_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("SORT_VERIFICATION_RETRY_MAX_OUTPUT_TOKENS", "10000"))
 	# Retry policy for token-limit events.
 	LLM_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("LLM_RETRY_MAX_OUTPUT_TOKENS", "36000"))
 	LLM_RETRY_TOKEN_GROWTH_FACTOR: float = float(os.getenv("LLM_RETRY_TOKEN_GROWTH_FACTOR", "2.0"))
+
+	# File summary compression knobs used by context manager.
+	FILE_SUMMARY_SOURCE_MAX_CHARS: int = int(os.getenv("FILE_SUMMARY_SOURCE_MAX_CHARS", "12000"))
+	FILE_SUMMARY_MAX_OUTPUT_TOKENS: int = int(os.getenv("FILE_SUMMARY_MAX_OUTPUT_TOKENS", "1024"))
+	FILE_SUMMARY_RETRY_MAX_OUTPUT_TOKENS: int = int(os.getenv("FILE_SUMMARY_RETRY_MAX_OUTPUT_TOKENS", "2400"))
+
+	# RAG prompt rendering controls to reduce repeated summary bloat.
+	RAG_SUMMARY_MAX_CHARS: int = int(os.getenv("RAG_SUMMARY_MAX_CHARS", "280"))
 	
 	PARSER_MIN_TEXT_CHARS: int = int(os.getenv("PARSER_MIN_TEXT_CHARS", "100"))
 	PDF_OCR_MAX_PAGES: int = int(os.getenv("PDF_OCR_MAX_PAGES", "30"))
@@ -80,7 +100,7 @@ class Settings:
 	RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
 	RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
 	RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "8"))
-	RAG_RERANK_ENABLED: bool = os.getenv("RAG_RERANK_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+	RAG_RERANK_ENABLED: bool = os.getenv("RAG_RERANK_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 	RAG_RERANK_MODEL: str = os.getenv("RAG_RERANK_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 	RAG_RERANK_DEVICE: str = os.getenv("RAG_RERANK_DEVICE", "cpu")
 	RAG_RERANK_PRE_TOP_K: int = int(os.getenv("RAG_RERANK_PRE_TOP_K", "20"))

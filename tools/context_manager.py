@@ -104,14 +104,18 @@ def get_or_create_file_summary(
             f"File path: {file_path}\n"
             "Generate a concise summary containing document metadata clues, key entities, "
             "numbers/dates, and the main purpose. Keep factual and avoid speculation.\n\n"
-            f"Content:\n{cleaned[:30000]}"
+            f"Content:\n{cleaned[:config.FILE_SUMMARY_SOURCE_MAX_CHARS]}"
         )
         try:
             response = llm_service.generate_structured(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=FileSummaryResponse,
-                max_completion_tokens=max(config.CLASSIFICATION_MAX_TOKENS * 6, 256),
+                max_completion_tokens=max(config.FILE_SUMMARY_MAX_OUTPUT_TOKENS, 256),
+                retry_max_output_tokens=max(
+                    config.FILE_SUMMARY_RETRY_MAX_OUTPUT_TOKENS,
+                    config.FILE_SUMMARY_MAX_OUTPUT_TOKENS,
+                ),
             )
             summary = response.summary.strip() or _fallback_summary(file_path=file_path, raw_text=cleaned)
         except Exception:
