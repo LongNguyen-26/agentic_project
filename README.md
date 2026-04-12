@@ -15,7 +15,7 @@ The system uses a nested graph:
 - Python 3.12+
 - Network access to the competition API
 - OpenAI API key
-- Optional but recommended: `uv` package manager for reproducible installs
+- Recommended: uv package manager (lockfile-first workflow)
 
 ### 2. Prepare Environment Variables
 Create `.env` from template:
@@ -42,15 +42,35 @@ Set required keys in `.env`:
 
 ### 3. Install Dependencies
 
-#### Option A: uv (Recommended)
-Use lock-based installation for reproducibility.
+#### Option A: uv sync from lockfile (Primary and Recommended)
+This repository includes `uv.lock`, so this is the preferred installation path.
+
+If uv is not installed yet:
+
+Windows (PowerShell):
+```powershell
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
+Linux/macOS:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then install runtime dependencies exactly from lockfile:
 
 Windows/Linux/macOS:
 ```bash
 uv sync --frozen
 ```
 
-#### Option B: venv + pip (Fallback)
+If you need to run tests, install dev dependencies as well:
+
+```bash
+uv sync --frozen --extra dev
+```
+
+#### Option B: venv + pip (Fallback only if uv is unavailable)
 
 Windows (cmd):
 ```bat
@@ -86,6 +106,13 @@ python -c "import langgraph, openai, instructor, pymupdf4llm; print('dependencie
 ## Execution Instructions
 
 ### 1. Run the agent
+
+Preferred (uses uv-managed environment without manual activation):
+```bash
+uv run python main.py
+```
+
+Alternative (if you manually activated `.venv`):
 ```bash
 python main.py
 ```
@@ -102,7 +129,12 @@ python main.py
 
 ## Testing Instructions
 
-Run full test suite:
+Preferred (after `uv sync --frozen --extra dev`):
+```bash
+uv run pytest tests -q
+```
+
+Alternative (if `.venv` already activated):
 ```bash
 python -m pytest tests -q
 ```
@@ -112,8 +144,43 @@ Run parser-only tests:
 python -m pytest tests/test_document_parser.py -q
 ```
 
+## Optional: Docker Execution (Fallback Path)
+Use this path when local Python/uv setup is blocked or unstable.
+
+### 1. Build image
+Run from repository root:
+
+```bash
+docker build -t dut-trust-agent .
+```
+
+### 2. Run container with environment file
+
+```bash
+docker run --rm --env-file .env dut-trust-agent
+```
+
+### 3. Persist runtime artifacts (optional)
+To keep logs/checkpoints outside container:
+
+Linux/macOS:
+```bash
+docker run --rm --env-file .env -v "$(pwd)/storage:/app/storage" dut-trust-agent
+```
+
+Windows (PowerShell):
+```powershell
+docker run --rm --env-file .env -v "${PWD}\storage:/app/storage" dut-trust-agent
+```
+
+### 4. Notes
+- The provided Dockerfile installs runtime dependencies only (`uv sync --frozen --no-dev`).
+- If you need tests in container, build a separate debug image that includes dev dependencies.
+- Container mode still requires valid `COMPETITION_BASE_URL`, `API_KEY`, and `OPENAI_API_KEY` in `.env`.
+
 ## Reproducibility Notes
 - Use `uv sync --frozen` to match the lockfile exactly.
+- Use `uv sync --frozen --extra dev` when running tests.
 - Use the same Python major/minor version across environments.
 - Keep `.env` local and never commit secrets.
 
