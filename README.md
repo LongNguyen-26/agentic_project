@@ -150,40 +150,6 @@ Run parser-only tests:
 uv run pytest src/tests/test_document_parser.py -q
 ```
 
-## Optional: Docker Execution (Fallback Path)
-Use this path when local Python/uv setup is blocked or unstable.
-
-### 1. Build image
-Run from repository root:
-
-```bash
-docker build -t dut-trust-agent .
-```
-
-### 2. Run container with environment file
-
-```bash
-docker run --rm --env-file .env dut-trust-agent
-```
-
-### 3. Persist runtime artifacts (optional)
-To keep logs/checkpoints outside container:
-
-Linux/macOS:
-```bash
-docker run --rm --env-file .env -v "$(pwd)/storage:/app/storage" dut-trust-agent
-```
-
-Windows (PowerShell):
-```powershell
-docker run --rm --env-file .env -v "${PWD}\storage:/app/storage" dut-trust-agent
-```
-
-### 4. Notes
-- The provided Dockerfile installs runtime dependencies only (`uv sync --frozen --no-dev`).
-- If you need tests in container, build a separate debug image that includes dev dependencies.
-- Container mode still requires valid `COMPETITION_BASE_URL`, `API_KEY`, and `OPENAI_API_KEY` in `.env`.
-
 ## Reproducibility Notes
 - Use `uv sync --frozen` to match the lockfile exactly.
 - Use `uv sync --frozen --extra dev` when running tests.
