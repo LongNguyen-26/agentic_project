@@ -5,7 +5,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from config import config
+from devday_agent.config import config
 from devday_agent.core.checkpoint import load_file_summary_cache, save_file_summary_cache
 from devday_agent.core.logger import get_logger
 from devday_agent.models.llm_schemas import FileSummaryResponse

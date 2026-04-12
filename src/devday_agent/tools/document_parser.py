@@ -10,7 +10,7 @@ import fitz
 import pymupdf4llm
 from openai import OpenAI
 
-from config import config
+from devday_agent.config import config
 from devday_agent.core.logger import get_logger
 
 openai_client = OpenAI(api_key=config.OPENAI_API_KEY)

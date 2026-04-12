@@ -19,14 +19,14 @@ from devday_agent.agent.prompts.user_prompt import (
 from devday_agent.agent.state import InnerState
 from devday_agent.clients.competition_client import APIClient
 from devday_agent.clients.llm_client import LLMService
-from config import config
+from devday_agent.config import config
 from devday_agent.core.logger import get_logger
 from devday_agent.core.checkpoint import load_parsed_text_cache, save_parsed_text_cache
 from devday_agent.models.llm_schemas import QAActionSchema, SortActionResponse, VerificationResponse
-from tools.context_manager import format_context_from_documents, format_full_context, get_or_create_file_summary
-from tools.document_parser import parse_resource_bytes
-from tools.rag_engine import build_and_retrieve_context
-from tools.vision_tool import analyze_images_from_cache
+from devday_agent.tools.context_manager import format_context_from_documents, format_full_context, get_or_create_file_summary
+from devday_agent.tools.document_parser import parse_resource_bytes
+from devday_agent.tools.rag_engine import build_and_retrieve_context
+from devday_agent.tools.vision_tool import analyze_images_from_cache
 
 llm_service = None
 api_client = None

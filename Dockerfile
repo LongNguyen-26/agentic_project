@@ -22,8 +22,9 @@ RUN uv sync --frozen --no-dev
 
 # Use the uv-managed virtual environment when running python.
 ENV PATH="/app/.venv/bin:${PATH}"
+ENV PYTHONPATH="/app/src"
 
 # Judge usage examples:
 #   docker build -t dut-trust-agent .
 #   docker run --rm --env-file .env dut-trust-agent
-ENTRYPOINT ["python", "main.py"]
+ENTRYPOINT ["python", "-m", "devday_agent.main"]

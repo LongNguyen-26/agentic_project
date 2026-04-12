@@ -4,7 +4,7 @@ from typing import List
 
 from openai import OpenAI
 
-from config import config
+from devday_agent.config import config
 from devday_agent.core.logger import get_logger
 
 

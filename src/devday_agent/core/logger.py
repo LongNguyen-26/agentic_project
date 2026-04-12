@@ -3,7 +3,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-from config import config
+from devday_agent.config import config
 
 
 def setup_logging(level: Optional[str] = None) -> None:

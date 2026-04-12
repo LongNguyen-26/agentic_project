@@ -99,8 +99,15 @@ pip install -e .
 ### 4. Validate Installation
 Run a quick import check:
 
+Preferred (uv-managed env):
 ```bash
-python -c "import langgraph, openai, instructor, pymupdf4llm; print('dependencies-ok')"
+uv run --directory src python -c "import langgraph, openai, instructor, pymupdf4llm, devday_agent; print('dependencies-ok')"
+```
+
+Alternative (if `.venv` is already activated, run from `src/`):
+```bash
+cd src
+python -c "import langgraph, openai, instructor, pymupdf4llm, devday_agent; print('dependencies-ok')"
 ```
 
 ## Execution Instructions
@@ -109,12 +116,13 @@ python -c "import langgraph, openai, instructor, pymupdf4llm; print('dependencie
 
 Preferred (uses uv-managed environment without manual activation):
 ```bash
-uv run python main.py
+uv run --directory src python -m devday_agent.main
 ```
 
-Alternative (if you manually activated `.venv`):
+Alternative (if you manually activated `.venv`, run from `src/`):
 ```bash
-python main.py
+cd src
+python -m devday_agent.main
 ```
 
 ### 2. Expected runtime signals
@@ -131,17 +139,18 @@ python main.py
 
 Preferred (after `uv sync --frozen --extra dev`):
 ```bash
-uv run pytest tests -q
+uv run --directory src pytest tests -q
 ```
 
-Alternative (if `.venv` already activated):
+Alternative (if `.venv` already activated, run from `src/`):
 ```bash
+cd src
 python -m pytest tests -q
 ```
 
 Run parser-only tests:
 ```bash
-python -m pytest tests/test_document_parser.py -q
+uv run --directory src pytest tests/test_document_parser.py -q
 ```
 
 ## Optional: Docker Execution (Fallback Path)
@@ -185,12 +194,12 @@ docker run --rm --env-file .env -v "${PWD}\storage:/app/storage" dut-trust-agent
 - Keep `.env` local and never commit secrets.
 
 ## Repository Structure
-- `agent/`: graph composition, routers, and nodes
-- `clients/`: competition and LLM clients
-- `tools/`: parser, context manager, RAG, vision tool
-- `models/`: pydantic schemas for API and LLM structured outputs
-- `core/`: logger, checkpoints, shared exceptions
-- `tests/`: unit tests
+- `src/devday_agent/agent/`: graph composition, routers, and nodes
+- `src/devday_agent/clients/`: competition and LLM clients
+- `src/devday_agent/tools/`: parser, context manager, RAG, vision tool
+- `src/devday_agent/models/`: pydantic schemas for API and LLM structured outputs
+- `src/devday_agent/core/`: logger, checkpoints, shared exceptions
+- `src/tests/`: unit tests
 
 ## Additional Documents
 - `ARCHITECTURE.md`

@@ -53,10 +53,10 @@ from typing import Any
 from langgraph.graph import StateGraph, END
 
 from devday_agent.core.logger import get_logger
-from .state import InnerState, OuterState
+from devday_agent.agent.state import InnerState, OuterState
 
 # Import node implementations from devday_agent.agent/nodes.
-from .nodes.inner_loop import (
+from devday_agent.agent.nodes.inner_loop import (
     observability_node, 
     setup_rag_node, 
     setup_context_manager_node, 
@@ -64,8 +64,8 @@ from .nodes.inner_loop import (
     verifiability_node,
     vision_tool_node,
 )
-from .nodes.outer_loop import auth_node, fetch_task_node, planning_node, submit_node
-from .nodes.router import route_rag_or_context, check_verification, route_after_action, route_outer_loop
+from devday_agent.agent.nodes.outer_loop import auth_node, fetch_task_node, planning_node, submit_node
+from devday_agent.agent.nodes.router import route_rag_or_context, check_verification, route_after_action, route_outer_loop
 
 
 logger = get_logger(__name__)

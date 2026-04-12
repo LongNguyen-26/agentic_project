@@ -2,7 +2,7 @@ import unittest
 from unittest import mock
 
 from devday_agent.agent.nodes import inner_loop
-from config import config
+from devday_agent.config import config
 
 
 class FolderVerifiabilityTests(unittest.TestCase):

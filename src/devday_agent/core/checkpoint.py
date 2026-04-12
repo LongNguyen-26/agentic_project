@@ -4,7 +4,7 @@ import hashlib
 import os
 from typing import Any, Dict, Optional, Tuple
 
-from config import config
+from devday_agent.config import config
 from devday_agent.core.logger import get_logger
 
 

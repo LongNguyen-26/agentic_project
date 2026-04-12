@@ -9,7 +9,7 @@ from instructor.core.exceptions import IncompleteOutputException, InstructorRetr
 from openai import APIError, APITimeoutError, BadRequestError, OpenAI, RateLimitError
 from pydantic import BaseModel, ValidationError
 
-from config import config
+from devday_agent.config import config
 from devday_agent.core.logger import get_logger
 from devday_agent.models.llm_schemas import (
     PlanningHintsResponse,

@@ -32,9 +32,9 @@ class ContextOverflowRetryTests(unittest.TestCase):
         fake_client = mock.Mock()
         fake_client.chat.completions.create.side_effect = fake_create
 
-        with mock.patch("clients.llm_client.instructor.from_openai", return_value=fake_client), mock.patch(
-            "clients.llm_client.OpenAI"
-        ), mock.patch("clients.llm_client.time.sleep", return_value=None):
+        with mock.patch("devday_agent.clients.llm_client.instructor.from_openai", return_value=fake_client), mock.patch(
+            "devday_agent.clients.llm_client.OpenAI"
+        ), mock.patch("devday_agent.clients.llm_client.time.sleep", return_value=None):
             service = LLMService()
             result = service._chat_with_retries(
                 response_model=_DummyResponse,

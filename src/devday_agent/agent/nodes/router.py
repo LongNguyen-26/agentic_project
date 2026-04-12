@@ -1,6 +1,6 @@
 # agent/nodes/router.py
 from devday_agent.agent.state import InnerState, OuterState
-from config import config
+from devday_agent.config import config
 from devday_agent.core.logger import get_logger
 
 logger = get_logger(__name__)
