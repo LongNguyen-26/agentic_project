@@ -35,6 +35,7 @@ class Settings:
 	OPENAI_EMBEDDING_MODEL: str = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 	MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4o")
 	MODEL_REASONING_ID: str = os.getenv("REASONING_MODEL", "o3-mini")
+	TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0.1"))
 	# MODEL_REASONING_ID: str = os.getenv("REASONING_MODEL", "gpt-5.3-chat-latest")
 
 	# ── Runtime/Resilience ─────────────────────────────────────────────────────

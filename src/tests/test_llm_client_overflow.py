@@ -5,6 +5,7 @@ from instructor.core.exceptions import InstructorRetryException
 from pydantic import BaseModel
 
 from devday_agent.clients.llm_client import LLMService
+from devday_agent.config import config
 
 
 class _DummyResponse(BaseModel):
@@ -56,6 +57,12 @@ class ContextOverflowRetryTests(unittest.TestCase):
         self.assertGreater(len(first_messages), len(second_messages))
         self.assertEqual(second_messages[0]["role"], "system")
         self.assertEqual(second_messages[-1]["content"], "latest user")
+
+
+class ConfigSettingsTests(unittest.TestCase):
+    def test_temperature_setting_exists_and_is_float(self):
+        self.assertTrue(hasattr(config, "TEMPERATURE"))
+        self.assertIsInstance(config.TEMPERATURE, float)
 
 
 if __name__ == "__main__":
